@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ATHRag": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/Projects/ATHRag && source .venv/bin/activate && python -m src.mcp.server"
+      ],
+      "env": {
+        "PYTHONPATH": "~/Projects/ATHRag"
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+# ATHRag依赖
+# 安装命令: pip install -r requirements.txt
+
+# Web Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.17
+
+# Vector Database
+qdrant-client>=1.12.0
+
+# Database
+sqlalchemy>=2.0.36
+alembic>=1.14.0
+aiosqlite>=0.20.0
+
+# Document Processing (注意: Python 3.14 可能需要特殊处理)
+# mineru>=0.1.0  # 需要 Python 3.10-3.13，3.14可能需要从源码安装
+unstructured[all-docs]>=0.16.0
+markdown>=3.7
+python-docx>=1.1.2
+pypdf>=5.1.0
+beautifulsoup4>=4.12.0
+lxml>=5.3.0
+
+# Embedding / LLM
+ollama>=0.4.0
+openai>=1.55.0
+
+# Search & NLP
+rank-bm25>=0.2.2
+jieba>=0.42.1
+scikit-learn>=1.5.0
+
+# MCP (Model Context Protocol)
+mcp>=1.0.0
+
+# CLI
+typer>=0.13.0
+rich>=13.9.0
+
+# Utilities
+pydantic>=2.9.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.0
+aiofiles>=24.1.0
+tenacity>=9.0.0
+httpx>=0.27.0
+watchdog>=6.0.0
+pathspec>=0.12.0
+loguru>=0.7.0
