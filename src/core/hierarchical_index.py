@@ -10,6 +10,7 @@ Query → 摘要搜索（找到相关文档）→ chunks 搜索（在这些文�
 
 import logging
 import hashlib
+import httpx
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
