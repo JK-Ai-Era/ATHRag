@@ -32,8 +32,8 @@ from src.core.comment_extractor import (
     CONFIG_EXTENSIONS,  # 配置文件类型（不入索引）
 )
 
-# 支持的文件扩展名（不包括代码文件和配置文件）
-SUPPORTED_EXTENSIONS = DOC_EXTENSIONS | IMAGE_EXTENSIONS
+# 支持的文件扩展名（包括代码文件，代码通过注释提取入索引）
+SUPPORTED_EXTENSIONS = DOC_EXTENSIONS | IMAGE_EXTENSIONS | CODE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -450,9 +450,7 @@ class FileSync:
             file_path: 文件路径
             
         Returns:
-            文档类型: 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'image' | 'md' | 'txt'
-            
-        注意：代码文件不入 RAG 索引，此方法不会返回 'code' 类型
+            文档类型: 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'image' | 'md' | 'txt' | 'code'
         """
         ext = file_path.suffix.lower()
         
@@ -470,6 +468,10 @@ class FileSync:
         # 图片类型（使用统一配置）
         if ext in IMAGE_EXTENSIONS:
             return "image"
+        
+        # 代码类型（通过注释提取入索引）
+        if ext in CODE_EXTENSIONS:
+            return "code"
         
         return "other"
     
@@ -555,57 +557,53 @@ class FileSync:
             return {"status": "error", "error": str(e)}
     
     def _update_document(self, doc: DocumentModel, source_path: Path) -> Dict[str, Any]:
-        """更新现有文档（同步）"""
+        """更新现有文档（蓝绿模式：先处理成功再删旧数据）"""
         try:
-            # 删除旧数据
-            old_chunk_count = doc.chunk_count
-            
-            # 删除旧向量
-            chunks = self.db.query(ChunkModel).filter(
-                ChunkModel.document_id == doc.id
-            ).all()
-            
-            for chunk in chunks:
-                if chunk.vector_id:
-                    self.vector_store.delete_vector(self.project_id, chunk.vector_id)
-                self.db.delete(chunk)
-            
-            self.db.commit()
-            
-            # 复制新文件
+            # 复制新文件到临时位置
             project_dir = settings.PROJECTS_DIR / self.project_id
             dest_path = project_dir / doc.filename
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, dest_path)
             
-            # 更新文档基本信息
-            doc.file_size = dest_path.stat().st_size
-            doc.file_path = str(source_path)
-            doc.status = "processing"
-            doc.updated_at = datetime.utcnow()
-            self.db.commit()
-            
-            # 使用 DocumentService 重新处理
+            # 先用新文件处理（创建新文档记录）
             doc_type = self.get_doc_type(source_path)
             result = self.doc_service.process_document(
                 file_path=dest_path,
                 doc_type=doc_type,
                 project_id=self.project_id,
-                document_id=doc.id,
                 filename=doc.filename,
-                source_path=str(source_path),  # 传递原始文件路径
+                source_path=str(source_path),
                 metadata={"source_path": str(source_path)}
             )
             
-            if result.success:
-                logger.info(f"Updated document '{doc.filename}' (ID: {doc.id})")
-                return {"status": "updated", "doc_id": doc.id}
-            else:
+            if not result.success:
                 logger.error(f"Error updating document {doc.filename}: {result.error_message}")
                 return {"status": "error", "error": result.error_message}
             
+            # 新文档处理成功，再删除旧文档数据
+            old_chunk_count = doc.chunk_count
+            old_chunks = self.db.query(ChunkModel).filter(
+                ChunkModel.document_id == doc.id
+            ).all()
+            
+            for chunk in old_chunks:
+                if chunk.vector_id:
+                    try:
+                        self.vector_store.delete_vector(self.project_id, chunk.vector_id)
+                    except Exception as e:
+                        logger.warning(f"删除旧向量失败 {chunk.vector_id}: {e}")
+                self.db.delete(chunk)
+            
+            # 删除旧文档记录
+            self.db.delete(doc)
+            self.db.commit()
+            
+            logger.info(f"Updated document '{doc.filename}' (new ID: {result.document_id})")
+            return {"status": "updated", "doc_id": result.document_id}
+            
         except Exception as e:
             logger.error(f"Error updating document {doc.filename}: {e}")
+            self.db.rollback()
             return {"status": "error", "error": str(e)}
     
     def delete_file(self, relative_path: str) -> Dict[str, Any]:

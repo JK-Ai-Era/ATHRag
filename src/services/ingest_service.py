@@ -96,7 +96,11 @@ class IngestService:
             }
     
     async def reindex_document(self, project_id: str, document_id: str) -> Dict[str, Any]:
-        """重新索引文档"""
+        """重新索引文档
+        
+        修复流程：先保存文档元信息，再删除旧数据，最后用保存的信息重新处理。
+        避免 delete_document 后 document_id 失效导致创建新文档记录。
+        """
         doc = self.db.query(DocumentModel).filter(
             DocumentModel.id == document_id,
             DocumentModel.project_id == project_id,
@@ -105,23 +109,36 @@ class IngestService:
         if not doc:
             raise ValueError("文档不存在")
         
-        # 先删除旧数据
+        # 先保存文档元信息（delete_document 会删除数据库记录）
+        saved_filename = doc.filename
+        saved_doc_type = doc.doc_type
+        saved_source_path = doc.source_path
+        saved_file_path = doc.file_path
+        
+        # 删除旧数据（保留物理文件）
         self.doc_service.delete_document(document_id, delete_file=False)
         
-        # 重新处理
-        file_path = settings.PROJECTS_DIR / project_id / doc.filename
-        doc_type = doc.doc_type
+        # 确定文件路径：优先用项目目录内的文件
+        file_path = settings.PROJECTS_DIR / project_id / saved_filename
+        if not file_path.exists() and saved_file_path:
+            file_path = Path(saved_file_path)
+        if not file_path.exists() and saved_source_path:
+            file_path = Path(saved_source_path)
         
+        if not file_path.exists():
+            raise ValueError(f"文件不存在，无法重新索引: {saved_filename}")
+        
+        # 重新处理（不传 document_id，让 DocumentService 创建新记录）
         result = self.doc_service.process_document(
             file_path=file_path,
-            doc_type=doc_type,
+            doc_type=saved_doc_type,
             project_id=project_id,
-            document_id=document_id,
-            filename=doc.filename
+            filename=saved_filename,
+            source_path=saved_source_path,
         )
         
         return {
-            "id": doc.id,
+            "id": result.document_id,
             "status": "completed" if result.success else "failed",
             "chunk_count": result.vector_count,
         }

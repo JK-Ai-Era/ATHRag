@@ -16,9 +16,6 @@ from src.rag_api.config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# 默认数据库路径
-DEFAULT_DB_PATH = Path("/Users/jk/Projects/ATHRag/db/metadata.db")
-
 # 全局线程池，用于异步执行同步操作
 _executor: Optional[ThreadPoolExecutor] = None
 
@@ -65,13 +62,15 @@ class EmbeddingService:
         """对单个文本进行向量化（异步）
         
         使用异步HTTP请求，不阻塞事件循环。
+        与 embed_text_sync 行为一致：零向量/空向量抛异常，不返回零向量污染下游。
         """
         if not text or not text.strip():
-            return [0.0] * self.embed_dim
+            raise ValueError("文本为空，无法向量化")
         
         # 截断过长文本
-        max_chars = 8000
+        max_chars = min(4000, settings.MAX_CHUNK_SIZE)
         if len(text) > max_chars:
+            logger.warning(f"文本过长 ({len(text)} 字符)，截断到 {max_chars}")
             text = text[:max_chars]
         
         try:
@@ -89,11 +88,21 @@ class EmbeddingService:
             
             if not embedding:
                 logger.warning("Ollama 返回空向量")
-                return [0.0] * self.embed_dim
+                raise ValueError("Ollama 返回空向量")
+            
+            # 检查零向量
+            if all(v == 0.0 for v in embedding):
+                logger.warning("Ollama 返回零向量（可能服务未就绪）")
+                raise ValueError("零向量，服务可能未就绪")
             
             return embedding
             
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 500:
+                error_text = e.response.text
+                if "input length exceeds" in error_text.lower():
+                    logger.error(f"输入过长导致 Ollama 500: {len(text)} 字符")
+                    raise ValueError(f"输入过长 ({len(text)} 字符)，需要进一步切分")
             logger.error(f"Embedding HTTP 错误: {e.response.status_code} - {e.response.text}")
             raise
         except httpx.RequestError as e:
@@ -276,7 +285,7 @@ def update_chunk_vector_status(
     chunk_id: str,
     status: str,
     error: Optional[str] = None,
-    db_path: Path = DEFAULT_DB_PATH
+    db_path: Optional[Path] = None
 ) -> bool:
     """
     更新 chunk 的向量状态
@@ -285,11 +294,13 @@ def update_chunk_vector_status(
         chunk_id: Chunk ID
         status: 'pending' | 'success' | 'failed'
         error: 错误信息（失败时）
-        db_path: 数据库路径
+        db_path: 数据库路径，默认从配置读取
         
     Returns:
         是否更新成功
     """
+    if db_path is None:
+        db_path = settings.DB_PATH
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -335,7 +346,7 @@ def get_failed_chunks(
     project_id: Optional[str] = None,
     max_retry: int = 3,
     limit: int = 100,
-    db_path: Path = DEFAULT_DB_PATH
+    db_path: Optional[Path] = None
 ) -> List[dict]:
     """
     获取向量失败的 chunks
@@ -344,11 +355,13 @@ def get_failed_chunks(
         project_id: 项目 ID（可选）
         max_retry: 最大重试次数
         limit: 最大返回数
-        db_path: 数据库路径
+        db_path: 数据库路径，默认从配置读取
         
     Returns:
         [{"id": str, "project_id": str, "error": str, "retry_count": int}, ...]
     """
+    if db_path is None:
+        db_path = settings.DB_PATH
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -394,7 +407,7 @@ def get_failed_chunks(
 def reset_failed_chunks(
     project_id: Optional[str] = None,
     chunk_ids: Optional[List[str]] = None,
-    db_path: Path = DEFAULT_DB_PATH
+    db_path: Optional[Path] = None
 ) -> int:
     """
     重置失败的 chunks 为 pending（待重试）
@@ -402,11 +415,13 @@ def reset_failed_chunks(
     Args:
         project_id: 项目 ID（可选，与 chunk_ids 二选一）
         chunk_ids: Chunk ID 列表（可选）
-        db_path: 数据库路径
+        db_path: 数据库路径，默认从配置读取
         
     Returns:
         重置的数量
     """
+    if db_path is None:
+        db_path = settings.DB_PATH
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()

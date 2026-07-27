@@ -94,8 +94,6 @@ class WatcherManager:
         self._stop_event: Optional[threading.Event] = None
 
         self._initialized = True
-
-        self._initialized = True
         logger.info(f"WatcherManager initialized with root: {self.projects_root}")
 
     def _scan_project(self, handler, project_path: Path, project_name: str) -> None:

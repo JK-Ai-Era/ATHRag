@@ -46,6 +46,31 @@ class SummaryGenerator:
     def __init__(self, model: str = None):
         self.model = model or settings.OLLAMA_SUMMARY_MODEL
         self._ollama_host = settings.OLLAMA_HOST
+        self._async_client: Optional[httpx.AsyncClient] = None
+        self._sync_client: Optional[httpx.Client] = None
+    
+    @property
+    def async_client(self) -> httpx.AsyncClient:
+        """懒加载异步客户端，连接池复用"""
+        if self._async_client is None:
+            self._async_client = httpx.AsyncClient(timeout=60)
+        return self._async_client
+    
+    @property
+    def sync_client(self) -> httpx.Client:
+        """懒加载同步客户端，连接池复用"""
+        if self._sync_client is None:
+            self._sync_client = httpx.Client(timeout=60)
+        return self._sync_client
+    
+    async def close(self):
+        """关闭连接"""
+        if self._async_client:
+            await self._async_client.aclose()
+            self._async_client = None
+        if self._sync_client:
+            self._sync_client.close()
+            self._sync_client = None
     
     async def generate_summary(
         self, 
@@ -87,19 +112,30 @@ class SummaryGenerator:
 摘要："""
 
         try:
-            import httpx
-            import json
+            # 使用复用的异步客户端
+            # 尝试 /api/chat（更稳定）
+            response = await self.async_client.post(
+                f"{self._ollama_host}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 512,
+                    }
+                }
+            )
             
-            async with httpx.AsyncClient(timeout=60) as client:
-                # 使用 /api/chat 或 /api/generate
-                # 尝试 /api/chat（更稳定）
-                response = await client.post(
-                    f"{self._ollama_host}/api/chat",
+            if response.status_code == 404:
+                # 回退到 /api/generate
+                response = await self.async_client.post(
+                    f"{self._ollama_host}/api/generate",
                     json={
                         "model": self.model,
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
+                        "prompt": prompt,
                         "stream": False,
                         "options": {
                             "temperature": 0.3,
@@ -107,21 +143,6 @@ class SummaryGenerator:
                         }
                     }
                 )
-                
-                if response.status_code == 404:
-                    # 回退到 /api/generate
-                    response = await client.post(
-                        f"{self._ollama_host}/api/generate",
-                        json={
-                            "model": self.model,
-                            "prompt": prompt,
-                            "stream": False,
-                            "options": {
-                                "temperature": 0.3,
-                                "num_predict": 512,
-                            }
-                        }
-                    )
                 
                 response.raise_for_status()
                 data = response.json()
@@ -173,17 +194,30 @@ class SummaryGenerator:
 摘要："""
 
         try:
-            import httpx
+            # 使用复用的同步客户端
+            # 尝试 /api/chat（更稳定）
+            response = self.sync_client.post(
+                f"{self._ollama_host}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 512,
+                    }
+                }
+            )
             
-            with httpx.Client(timeout=60) as client:
-                # 尝试 /api/chat（更稳定）
-                response = client.post(
-                    f"{self._ollama_host}/api/chat",
+            if response.status_code == 404:
+                # 回退到 /api/generate
+                response = self.sync_client.post(
+                    f"{self._ollama_host}/api/generate",
                     json={
                         "model": self.model,
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
+                        "prompt": prompt,
                         "stream": False,
                         "options": {
                             "temperature": 0.3,
@@ -191,21 +225,6 @@ class SummaryGenerator:
                         }
                     }
                 )
-                
-                if response.status_code == 404:
-                    # 回退到 /api/generate
-                    response = client.post(
-                        f"{self._ollama_host}/api/generate",
-                        json={
-                            "model": self.model,
-                            "prompt": prompt,
-                            "stream": False,
-                            "options": {
-                                "temperature": 0.3,
-                                "num_predict": 512,
-                            }
-                        }
-                    )
                 
                 response.raise_for_status()
                 data = response.json()

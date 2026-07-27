@@ -87,8 +87,8 @@ class SemanticChunker:
             boundary_strength_threshold: 边界强度阈值（默认 0.5）
         """
         self.target_chunk_size = target_chunk_size or settings.CHUNK_SIZE
-        self.max_chunk_size = max_chunk_size or 8000  # 硬性上限，防止 Ollama 500
-        self.min_chunk_size = min_chunk_size or 300
+        self.max_chunk_size = max_chunk_size or settings.MAX_CHUNK_SIZE  # 从配置读取，防止 Ollama 500
+        self.min_chunk_size = min_chunk_size or settings.MIN_CHUNK_SIZE
         self.chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
         self.boundary_strength_threshold = boundary_strength_threshold
         

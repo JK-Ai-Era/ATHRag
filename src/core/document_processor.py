@@ -199,9 +199,12 @@ class DocumentProcessor:
         elif doc_type == "txt":
             return self._extract_txt(file_path)
         elif doc_type == "code":
-            # 代码文件不入 RAG 索引
-            # 推荐使用 grep/ripgrep 查找代码
-            raise ValueError(f"代码文件不入 RAG 索引，请使用 grep 查找: {file_path.name}")
+            # 代码文件通过注释提取器处理
+            from src.core.comment_extractor import extract_code_comments
+            text = extract_code_comments(file_path)
+            if not text.strip():
+                raise ValueError(f"代码文件无注释内容: {file_path.name}")
+            return text
         else:
             return self._extract_txt(file_path)
 

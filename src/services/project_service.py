@@ -126,8 +126,40 @@ class ProjectService:
         if not project:
             raise ValueError(f"项目不存在: {project_id}")
         
-        # 删除 Qdrant Collection
-        self.vector_store.delete_collection(project_id)
+        actual_id = str(project.id)
+        
+        # 删除 Qdrant Collection（主 Collection + 摘要 Collection）
+        self.vector_store.delete_collection(actual_id)
+        try:
+            from src.core.hierarchical_index import HierarchicalIndex
+            hi = HierarchicalIndex()
+            summary_collection = hi._get_summary_collection_name(actual_id)
+            self.vector_store.client.delete_collection(summary_collection)
+        except Exception as e:
+            logger.warning(f"删除摘要 Collection 失败（可能不存在）: {e}")
+        
+        # 删除 BM25 索引文件
+        try:
+            import shutil
+            bm25_path = settings.PROJECTS_DIR / actual_id / "bm25_index.pkl"
+            if bm25_path.exists():
+                bm25_path.unlink()
+                logger.debug(f"已删除 BM25 索引: {bm25_path}")
+            # 清除内存中的 BM25 缓存
+            from src.core.bm25_index import bm25_manager
+            bm25_manager.clear_cache(actual_id)
+        except Exception as e:
+            logger.warning(f"删除 BM25 索引失败: {e}")
+        
+        # 删除项目文件目录
+        try:
+            project_dir = settings.PROJECTS_DIR / actual_id
+            if project_dir.exists():
+                import shutil
+                shutil.rmtree(project_dir)
+                logger.debug(f"已删除项目目录: {project_dir}")
+        except Exception as e:
+            logger.warning(f"删除项目目录失败: {e}")
         
         # 删除数据库记录（级联删除文档和分块）
         self.db.delete(project)

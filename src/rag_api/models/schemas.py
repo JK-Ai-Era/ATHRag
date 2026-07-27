@@ -143,6 +143,7 @@ class SearchRequest(BaseModel):
     project_id: str = Field(..., description="项目ID")
     query: str = Field(..., min_length=1, max_length=1000, description="查询内容")
     top_k: int = Field(20, ge=1, le=100, description="返回数量")
+    offset: int = Field(0, ge=0, description="分页偏移量")
     search_mode: SearchMode = Field(SearchMode.HYBRID, description="搜索模式")
     score_threshold: Optional[float] = Field(None, ge=0, le=1, description="分数阈值")
     filters: Optional[Dict[str, Any]] = Field(None, description="过滤条件")
@@ -173,6 +174,8 @@ class SearchResponse(BaseModel):
     project_id: str
     results: List[SearchResult]
     total: int
+    offset: int = 0
+    limit: int = 0
     query_time_ms: int
 
 

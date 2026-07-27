@@ -55,6 +55,20 @@ class VectorStore:
                     distance=Distance.COSINE,
                 ),
             )
+            # 创建 payload 索引（用于按 document_id/chunk_id 过滤）
+            try:
+                self.client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name="document_id",
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
+                self.client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name="chunk_id",
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                )
+            except Exception as idx_e:
+                logger.warning(f"创建 payload 索引失败（非致命）: {idx_e}")
             logger.info(f"Created collection: {collection_name}")
             return True
         except Exception as e:
@@ -144,7 +158,6 @@ class VectorStore:
             # ⚠️ 不返回空列表！抛出异常让调用方处理
             # 调用方（document_service）会保留 chunks，可后续重新处理
             raise RuntimeError(f"批量添加向量失败: {e}")
-            return []
 
     def search(
         self,

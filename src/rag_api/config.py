@@ -79,6 +79,16 @@ class Settings(BaseSettings):
     MCP_SERVER_NAME: str = "ATHRag"
     MCP_TRANSPORT: str = "stdio"
 
+    # CORS 配置
+    CORS_ORIGINS: List[str] = [
+        "https://rag.kwok.vip",
+        "http://localhost:3000",
+        "http://localhost:3090",
+        "http://localhost:4000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3090",
+    ]
+
     # 认证配置
     AUTH_ENABLED: bool = True
     SECRET_KEY: str = ""
@@ -119,6 +129,29 @@ class Settings(BaseSettings):
                 RuntimeWarning,
                 stacklevel=2,
             )
+
+        # ADMIN_PASSWORD_HASH: 未设置时尝试从 ADMIN_PASSWORD 自动哈希
+        if not self.ADMIN_PASSWORD_HASH:
+            admin_password = os.environ.get("ADMIN_PASSWORD", "")
+            if admin_password:
+                password_bytes = admin_password.encode('utf-8')
+                if len(password_bytes) > 72:
+                    password_bytes = password_bytes[:72]
+                hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt(rounds=12))
+                self.ADMIN_PASSWORD_HASH = hashed.decode('utf-8')
+                warnings.warn(
+                    "ADMIN_PASSWORD_HASH not set, auto-hashed from ADMIN_PASSWORD. "
+                    "Please set ADMIN_PASSWORD_HASH in your .env for production.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "Neither ADMIN_PASSWORD_HASH nor ADMIN_PASSWORD is set. "
+                    "Authentication will fail until one is configured.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
 
 @lru_cache()

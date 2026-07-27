@@ -258,6 +258,36 @@ class EmbeddingQueueManager:
         
         conn.close()
         return items
+    
+    def reset_and_retry_failed(self, max_retry: int = 3) -> Dict[str, int]:
+        """重置失败项并返回重试统计
+        
+        综合操作：重置未达最大重试次数的失败项为 pending，并清理过期已完成项。
+        
+        Args:
+            max_retry: 最大重试次数
+            
+        Returns:
+            {"reset": int, "expired_cleared": int, "permanently_failed": int}
+        """
+        reset_count = self.reset_failed_items(max_retry)
+        cleared_count = self.clear_done_items()
+        
+        # 统计永久失败的项（超过最大重试次数）
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) FROM embedding_queue
+            WHERE status = 'failed' AND retry_count >= ?
+        """, (max_retry,))
+        permanently_failed = cursor.fetchone()[0]
+        conn.close()
+        
+        return {
+            "reset": reset_count,
+            "expired_cleared": cleared_count,
+            "permanently_failed": permanently_failed
+        }
 
 
 # 全局实例
@@ -273,8 +303,7 @@ def get_queue_manager(db_path: Optional[Path] = None) -> EmbeddingQueueManager:
         settings = get_settings()
         
         if db_path is None:
-            # 使用正确的数据库路径
-            db_path = Path("/Users/jk/Projects/ATHRag/db/metadata.db")
+            db_path = settings.DB_PATH
         
         _queue_manager = EmbeddingQueueManager(db_path)
     

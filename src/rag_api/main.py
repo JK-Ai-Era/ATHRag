@@ -55,15 +55,7 @@ app = FastAPI(
 # CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://rag.kwok.vip",
-        "https://rag.kwok.vip/",
-        "http://localhost:3000",
-        "http://localhost:3090",
-        "http://localhost:4000",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3090",
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

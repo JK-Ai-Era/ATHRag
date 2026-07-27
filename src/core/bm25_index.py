@@ -198,6 +198,8 @@ class BM25Index:
     ) -> List[Tuple[str, float, str]]:
         """搜索
         
+        优化：在锁内拷贝共享数据，在锁外执行 CPU 密集计算
+        
         Args:
             query: 查询字符串
             top_k: 返回结果数量
@@ -206,28 +208,28 @@ class BM25Index:
         Returns:
             List of (chunk_id, score, content)
         """
+        # 在锁内拷贝共享数据
         with self._lock:
             if not self.bm25 or not self.corpus:
                 return []
-            
-            # 分词
-            query_tokens = self.tokenize(query)
-            if not query_tokens:
-                return []
-            
-            # BM25 搜索
-            scores = self.bm25.get_scores(query_tokens)
-            
-            # 排序并过滤
-            results = []
-            for i, score in enumerate(scores):
-                if score >= score_threshold:
-                    results.append((self.chunk_ids[i], float(score), self.corpus[i]))
-            
-            # 按分数降序排序
-            results.sort(key=lambda x: x[1], reverse=True)
-            
-            return results[:top_k]
+            bm25 = self.bm25
+            chunk_ids = self.chunk_ids[:]
+            corpus = self.corpus[:]
+        
+        # 在锁外执行 CPU 密集计算
+        query_tokens = self.tokenize(query)
+        if not query_tokens:
+            return []
+        
+        scores = bm25.get_scores(query_tokens)
+        
+        results = []
+        for i, score in enumerate(scores):
+            if score >= score_threshold:
+                results.append((chunk_ids[i], float(score), corpus[i]))
+        
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:top_k]
     
     def save(self) -> bool:
         """保存索引到磁盘（原子写入）"""

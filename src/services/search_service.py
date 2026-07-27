@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from src.rag_api.config import get_settings
 from src.rag_api.models.schemas import (
     SearchRequest, SearchResponse, SearchResult,
-    QueryTransformMode,
+    QueryTransformMode, SearchMode,
 )
 from src.core.embedding import EmbeddingService
 from src.core.vector_store import VectorStore
@@ -112,7 +112,9 @@ class SearchService:
         if request.score_threshold:
             results = [r for r in results if r.score >= request.score_threshold]
         
-        # 限制返回数量
+        # 分页：先跳过 offset 条，再取 top_k 条
+        if request.offset > 0:
+            results = results[request.offset:]
         results = results[: request.top_k]
         
         query_time = int((time.time() - start_time) * 1000)
@@ -122,6 +124,8 @@ class SearchService:
             project_id=project_id,
             results=results,
             total=len(results),
+            offset=request.offset,
+            limit=request.top_k,
             query_time_ms=query_time,
         )
     
@@ -131,12 +135,12 @@ class SearchService:
         project_id: str,
         queries: List[str],
     ) -> List[SearchResult]:
-        """多 query 检索：对每个变体分别检索，合并去重"""
-        all_results: List[SearchResult] = []
-        seen_chunks = set()
+        """多 query 检索：并发执行，合并去重"""
+        import asyncio
         
+        # 并发执行所有变体的搜索
+        tasks = []
         for q in queries:
-            # 创建子请求（使用变体 query，关闭 query_transform 防止递归）
             sub_request = SearchRequest(
                 project_id=request.project_id,
                 query=q,
@@ -144,45 +148,51 @@ class SearchService:
                 search_mode=request.search_mode,
                 score_threshold=request.score_threshold,
                 filters=request.filters,
-                rerank=False,  # 先不做 rerank，最后统一做
+                rerank=False,
                 query_transform=QueryTransformMode.NONE,
             )
-            
-            sub_results = await self._single_query_search(sub_request, project_id)
-            
-            # 合并去重（按 chunk_id）
+            tasks.append(self._single_query_search(sub_request, project_id))
+        
+        # 等待所有搜索完成
+        all_sub_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 合并去重（按 chunk_id）
+        all_results: List[SearchResult] = []
+        seen_chunks = set()
+        
+        for sub_results in all_sub_results:
+            if isinstance(sub_results, Exception):
+                logger.warning(f"子查询失败: {sub_results}")
+                continue
             for r in sub_results:
                 if r.chunk_id not in seen_chunks:
                     seen_chunks.add(r.chunk_id)
                     all_results.append(r)
         
-        # 不再做二次 RRF —— _single_query_search 已经在 hybrid 模式下做了 RRF
-        # 这里只需按分数排序即可
         all_results.sort(key=lambda x: x.score, reverse=True)
-        
         return all_results
     
     async def _single_query_search(
         self, request: SearchRequest, project_id: str
     ) -> List[SearchResult]:
-        """单 query 检索（原有逻辑）"""
+        """单 query 检索"""
         results = []
         
-        # 根据搜索模式执行检索
-        if request.search_mode in ["semantic", "hybrid"]:
+        # 根据搜索模式执行检索（使用枚举比较）
+        if request.search_mode in (SearchMode.SEMANTIC, SearchMode.HYBRID):
             semantic_results = await self._semantic_search(request, project_id)
             results.extend(semantic_results)
         
-        if request.search_mode in ["keyword", "hybrid"]:
+        if request.search_mode in (SearchMode.KEYWORD, SearchMode.HYBRID):
             keyword_results = await self._keyword_search(request, project_id)
             results.extend(keyword_results)
         
-        if request.search_mode == "hierarchical":
+        if request.search_mode == SearchMode.HIERARCHICAL:
             hierarchical_results = await self._hierarchical_search(request, project_id)
             results.extend(hierarchical_results)
         
         # 结果融合（Hybrid 模式）
-        if request.search_mode == "hybrid" and results:
+        if request.search_mode == SearchMode.HYBRID and results:
             results = self._reciprocal_rank_fusion(results)
         
         return results
