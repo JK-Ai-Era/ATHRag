@@ -1,0 +1,51 @@
+# models.yaml — 统一模型配置
+# 一个文件管所有模型的选型和参数
+# 切换 provider = 切换实现，上游代码零改动
+
+# ===== 嵌入模型 =====
+embedding:
+  provider: ollama              # ollama | openai | huggingface
+  model: bge-m3
+  dimension: 1024
+  # openai 时：
+  # api_key: ${OPENAI_API_KEY}
+  # base_url: https://api.openai.com/v1
+
+# ===== 重排序模型 =====
+reranker:
+  provider: ollama
+  model: bge-reranker-v2-m3
+
+# ===== 摘要/LLM =====
+llm:
+  provider: ollama
+  model: qwen3.5:9b
+
+# ===== 文档解析 =====
+document:
+  pdf:
+    provider: mineru            # mineru | pypdf | pymupdf
+  office:
+    provider: unstructured      # unstructured | native
+  image:
+    provider: tesseract         # tesseract | paddleocr
+    languages: chi_sim+eng
+
+# ===== 音频解析 =====
+audio:
+  speech:
+    provider: whisper-local     # whisper-local | openai-api | funasr
+    model: base                 # whisper 模型大小
+    # openai-api 时：
+    # api_key: ${OPENAI_API_KEY}
+    # base_url: https://api.openai.com/v1
+  classify:
+    provider: panns             # panns | none
+    model: cnn14
+    device: auto                # auto | cpu | mps | cuda
+  features:
+    provider: librosa           # librosa（无需切换）
+
+# ===== 硬件 =====
+hardware:
+  device: auto                  # auto | cpu | mps | cuda

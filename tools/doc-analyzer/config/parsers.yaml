@@ -1,0 +1,93 @@
+# ATHRag 解析器注册配置
+#
+# 每个解析器定义：
+#   cli: CLI 工具名（用于日志和诊断）
+#   extensions: 支持的文件扩展名列表
+#   description: 描述
+#   timeout: 单文件解析超时（秒）
+#   enabled: 是否启用
+#
+# 注意：name（key）必须与内置解析器的 parser_name 一致。
+# 内置解析器：pdf, office, image, text, markdown, code
+
+parsers:
+  pdf:
+    cli: doc-analyze
+    extensions:
+      - ".pdf"
+    description: "PDF 文档解析（MinerU 优先 / pypdf 回退）"
+    timeout: 120
+    enabled: true
+
+  office:
+    cli: doc-analyze
+    extensions:
+      - ".docx"
+      - ".doc"
+      - ".xlsx"
+      - ".xls"
+      - ".pptx"
+      - ".ppt"
+    description: "Office 文档解析（Unstructured 优先 / 原生回退）"
+    timeout: 120
+    enabled: true
+
+  image:
+    cli: doc-analyze
+    extensions:
+      - ".jpg"
+      - ".jpeg"
+      - ".png"
+      - ".gif"
+      - ".bmp"
+      - ".tiff"
+      - ".webp"
+    description: "图片 OCR 文字提取"
+    timeout: 60
+    enabled: true
+
+  markdown:
+    cli: doc-analyze
+    extensions:
+      - ".md"
+      - ".markdown"
+    description: "Markdown 文档"
+    timeout: 10
+    enabled: true
+
+  text:
+    cli: doc-analyze
+    extensions:
+      - ".txt"
+      - ".rst"
+      - ".log"
+      - ".csv"
+      - ".tsv"
+    description: "纯文本文档"
+    timeout: 10
+    enabled: true
+
+  code:
+    cli: doc-analyze
+    extensions:
+      - ".py"
+      - ".js"
+      - ".jsx"
+      - ".ts"
+      - ".tsx"
+      - ".java"
+      - ".go"
+      - ".rs"
+      - ".cpp"
+      - ".c"
+      - ".h"
+      - ".hpp"
+      - ".cc"
+      - ".sh"
+      - ".bash"
+      - ".zsh"
+      - ".rb"
+      - ".php"
+    description: "代码文件（提取注释和 docstring）"
+    timeout: 30
+    enabled: true

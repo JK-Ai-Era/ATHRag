@@ -17,6 +17,8 @@ from watchdog.observers import Observer
 from src.watcher.gitignore import gitignore_cache
 from src.watcher.sync import ConsistencyChecker, FileSync, ProjectMapping, SyncStats
 from src.rag_api.models.database import get_db_session
+from src.core.parse_dispatcher import ParseDispatcher
+from src.core.parse_worker import ParseWorker
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +151,7 @@ class FileChangeHandler(FileSystemEventHandler):
         self.db_session_factory = db_session_factory
         self.gitignore = gitignore_cache.get_parser(self.watch_root)
         self.stats = SyncStats()
+        self.dispatcher = ParseDispatcher()
         
         # 初始化防抖器 - 使用 threading.Timer
         self.debouncer = EventDebouncer(debounce_interval)
@@ -223,7 +226,7 @@ class FileChangeHandler(FileSystemEventHandler):
                 
                 for event in events:
                     try:
-                        self._process_single_event(event, file_sync)
+                        self._process_single_event(event, file_sync, str(project.id))
                     except Exception as e:
                         logger.error(f"Error processing event {event}: {e}")
                         self.stats.errors += 1
@@ -235,8 +238,12 @@ class FileChangeHandler(FileSystemEventHandler):
         finally:
             self._processing = False
     
-    def _process_single_event(self, event: FileEvent, file_sync: FileSync) -> None:
-        """处理单个事件（同步）"""
+    def _process_single_event(self, event: FileEvent, file_sync: FileSync, project_id: str) -> None:
+        """处理单个事件
+        
+        - created/modified: 写入 parse_queue（异步解析）
+        - deleted/moved: 直接调 FileSync（无需解析）
+        """
         if event.is_directory:
             return
         
@@ -250,17 +257,35 @@ class FileChangeHandler(FileSystemEventHandler):
         
         try:
             if event.event_type in ("created", "modified"):
-                # 使用同步方法
-                result = file_sync.sync_file(event.src_path, rel_path)
-                    
-                if result["status"] == "created":
-                    self.stats.created += 1
-                elif result["status"] == "updated":
-                    self.stats.updated += 1
-                elif result["status"] == "skipped":
+                # 检查是否是支持的格式
+                if not self.dispatcher.is_supported(event.src_path):
                     self.stats.skipped += 1
-                elif result["status"] == "error":
-                    self.stats.errors += 1
+                    return
+                
+                # 文件稳定性检查：确保文件写入完成
+                # 两次 stat 间隔 0.5s，如果大小不变则认为写入完成
+                try:
+                    size1 = event.src_path.stat().st_size
+                    import time as _time
+                    _time.sleep(0.5)
+                    size2 = event.src_path.stat().st_size
+                    if size1 != size2:
+                        logger.debug(f"文件仍在写入，跳过: {rel_path}")
+                        self.stats.skipped += 1
+                        return
+                except OSError:
+                    self.stats.skipped += 1
+                    return
+                
+                # 写入 parse_queue
+                task_id = ParseWorker.enqueue(
+                    file_path=event.src_path,
+                    project_id=project_id,
+                    file_type=self.dispatcher.find_parser(event.src_path) or "document",
+                    priority=0,
+                )
+                self.stats.created += 1
+                logger.debug(f"入队: {rel_path} → task={task_id}")
                     
             elif event.event_type == "deleted":
                 result = file_sync.delete_file(rel_path)
@@ -282,40 +307,45 @@ class FileChangeHandler(FileSystemEventHandler):
             self.stats.errors += 1
     
     def _scan_directory(self, directory: Path) -> None:
-        """扫描目录（同步）"""
+        """扫描目录 — 将所有文件入队（异步解析）"""
         if not directory.exists():
             return
         
         try:
-            # 使用上下文管理器，自动处理commit/rollback/close
             with get_db_session() as db:
                 project_mapping = ProjectMapping(db)
                 project = project_mapping.get_or_create_project(self.watch_root, self.project_name)
+                project_id = str(project.id)
                 
                 # 首先执行一致性检查（清理孤儿文件）
-                checker = ConsistencyChecker(db, str(project.id), self.watch_root)
+                checker = ConsistencyChecker(db, project_id, self.watch_root)
                 check_stats = checker.check_and_fix()
                 
                 if check_stats['orphaned_files'] > 0:
                     logger.info(f"一致性检查: 清理了 {check_stats['cleaned']}/{check_stats['orphaned_files']} 个孤儿文件")
-                
-                # 然后执行正常同步
-                file_sync = FileSync(db, str(project.id))
-                
-                for file_path in directory.rglob("*"):
-                    if file_path.is_file() and self.gitignore.should_process(file_path):
-                        rel_path = self._get_relative_path(file_path)
-                        if rel_path:
-                            try:
-                                # 使用同步方法
-                                result = file_sync.sync_file(file_path, rel_path)
-                                if result["status"] == "created":
-                                    self.stats.created += 1
-                                elif result["status"] == "updated":
-                                    self.stats.updated += 1
-                            except Exception as e:
-                                logger.error(f"Error syncing file {file_path}: {e}")
-                                self.stats.errors += 1
+            
+            # 扫描文件并入队（在单独 session 中，避免长事务）
+            enqueued = 0
+            for file_path in directory.rglob("*"):
+                if file_path.is_file() and self.gitignore.should_process(file_path):
+                    if not self.dispatcher.is_supported(file_path):
+                        continue
+                    
+                    try:
+                        ParseWorker.enqueue(
+                            file_path=file_path,
+                            project_id=project_id,
+                            file_type=self.dispatcher.find_parser(file_path) or "document",
+                            priority=0,
+                        )
+                        enqueued += 1
+                    except Exception as e:
+                        logger.error(f"Error enqueueing file {file_path}: {e}")
+                        self.stats.errors += 1
+            
+            logger.info(f"目录扫描完成: {enqueued} 个文件入队")
+        except Exception as e:
+            logger.error(f"Error scanning directory {directory}: {e}")
         except Exception as e:
             logger.error(f"Error scanning directory {directory}: {e}")
     

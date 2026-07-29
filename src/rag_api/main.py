@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.rag_api.auth import get_current_active_user
 from src.rag_api.config import get_settings
-from src.rag_api.routers import auth, documents, projects, search, watcher
+from src.rag_api.routers import auth, documents, parsers, projects, queue, search, watcher
 
 settings = get_settings()
 
@@ -90,6 +90,18 @@ app.include_router(
     watcher.router,
     prefix="/api/v1",
     tags=["watcher"],
+    dependencies=[Depends(get_current_active_user)],
+)
+app.include_router(
+    queue.router,
+    prefix="/api/v1/queue",
+    tags=["queue"],
+    dependencies=[Depends(get_current_active_user)],
+)
+app.include_router(
+    parsers.router,
+    prefix="/api/v1/parsers",
+    tags=["parsers"],
     dependencies=[Depends(get_current_active_user)],
 )
 

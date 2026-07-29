@@ -95,6 +95,30 @@ class Chunk(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ParseQueue(Base):
+    """解析队列表
+    
+    持久化文件变更事件，Worker 异步消费。
+    """
+    __tablename__ = "parse_queue"
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    file_path = Column(String(500), nullable=False)
+    file_hash = Column(String(64), nullable=True)  # SHA256，用于去重
+    file_type = Column(String(20), nullable=False)  # document / audio / image / code
+    project_id = Column(String(36), nullable=False, index=True)
+    status = Column(String(20), default="pending", index=True)  # pending / running / done / failed / skipped
+    priority = Column(Integer, default=0)  # 越小越优先：手动上传=10, 自动检测=0
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=3)
+    error_msg = Column(Text, nullable=True)
+    worker_id = Column(String(50), nullable=True)
+    result_json = Column(Text, nullable=True)  # 解析结果 JSON（done 时写入）
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class WatchMapping(Base):
     """文件监控映射表
     

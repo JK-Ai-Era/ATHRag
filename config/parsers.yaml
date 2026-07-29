@@ -1,0 +1,92 @@
+# 解析器注册配置
+# 新增格式支持只需：开发 CLI 工具 + 在此注册
+# ATHRag 核心代码零改动
+
+parsers:
+  document:
+    cli: doc-analyze
+    venv: ".venv"
+    file_type: document       # 显式声明 file_type（用于 parse_queue）
+    extensions:
+      - ".pdf"
+      - ".docx"
+      - ".doc"
+      - ".xlsx"
+      - ".xls"
+      - ".pptx"
+      - ".ppt"
+    description: "Office/PDF 文档解析"
+    timeout: 120
+    enabled: true
+
+  audio:
+    cli: audio-analyze
+    venv: ".venv"
+    file_type: audio
+    extensions:
+      - ".mp3"
+      - ".wav"
+      - ".flac"
+      - ".ogg"
+      - ".opus"
+      - ".m4a"
+      - ".aac"
+      - ".wma"
+      - ".aiff"
+    description: "音频文件分析（librosa + Whisper + PANNs）"
+    timeout: 300
+    enabled: true
+
+  image:
+    cli: doc-analyze
+    venv: ".venv"
+    file_type: image
+    extensions:
+      - ".jpg"
+      - ".jpeg"
+      - ".png"
+      - ".gif"
+      - ".bmp"
+      - ".tiff"
+      - ".webp"
+    description: "图片 OCR"
+    timeout: 60
+    enabled: true
+
+  text:
+    cli: doc-analyze
+    venv: ".venv"
+    file_type: document
+    extensions:
+      - ".md"
+      - ".txt"
+      - ".rst"
+    description: "纯文本/Markdown"
+    timeout: 10
+    enabled: true
+
+  code:
+    cli: doc-analyze
+    venv: ".venv"
+    file_type: document
+    extensions:
+      - ".py"
+      - ".js"
+      - ".jsx"
+      - ".ts"
+      - ".tsx"
+      - ".java"
+      - ".go"
+      - ".rs"
+      - ".cpp"
+      - ".c"
+      - ".h"
+      - ".hpp"
+      - ".cc"
+      - ".sh"
+      - ".bash"
+      - ".rb"
+      - ".php"
+    description: "代码注释提取"
+    timeout: 30
+    enabled: true

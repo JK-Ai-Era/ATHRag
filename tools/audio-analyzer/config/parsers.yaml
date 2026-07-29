@@ -1,0 +1,55 @@
+# 音频解析器注册配置
+# audio-analyzer 根据此配置路由文件到对应解析器
+
+parsers:
+  metadata:
+    module: "src.parsers.metadata"
+    class: "MetadataParser"
+    enabled: true
+    description: "音频元数据解析器（mutagen）"
+    formats:
+      - mp3
+      - wav
+      - flac
+      - ogg
+      - opus
+      - m4a
+      - aac
+      - wma
+      - aiff
+      - aif
+      - ape
+      - wv
+      - mpc
+      - spx
+      - tta
+
+  features:
+    module: "src.parsers.features"
+    class: "FeaturesParser"
+    enabled: true
+    description: "音频特征解析器（librosa）"
+    formats:
+      - mp3
+      - wav
+      - flac
+      - ogg
+      - opus
+      - m4a
+      - aac
+
+  speech:
+    module: "src.parsers.speech"
+    class: "SpeechParser"
+    enabled: true
+    description: "语音识别解析器（Whisper）"
+    formats:
+      - mp3
+      - wav
+      - flac
+      - ogg
+      - opus
+      - m4a
+      - aac
+      - wma
+      - aiff

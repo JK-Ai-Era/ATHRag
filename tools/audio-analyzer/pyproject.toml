@@ -1,0 +1,49 @@
+[project]
+name = "audio-analyzer"
+version = "0.1.0"
+description = "ATHRag 音频解析器 — 独立 CLI 工具，将音频文件解析为标准化 JSON"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "ATHRag Team"}
+]
+
+dependencies = [
+    # Core
+    "pyyaml>=6.0",
+
+    # Audio analysis
+    "librosa>=0.10.0",
+    "soundfile>=0.12.0",
+    "numpy>=1.24.0",
+
+    # Speech-to-text
+    "openai-whisper>=20231117",
+
+    # Audio metadata
+    "mutagen>=1.47.0",
+]
+
+[project.optional-dependencies]
+# 高级音频分析（PANNs）
+panns = [
+    "panns-inference>=0.1.0",
+]
+
+# 全部可选依赖
+all = [
+    "panns-inference>=0.1.0",
+]
+
+[project.scripts]
+audio-analyze = "src.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
