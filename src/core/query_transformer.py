@@ -14,8 +14,7 @@ from enum import Enum
 from typing import List, Optional
 from dataclasses import dataclass
 
-import httpx
-
+from src.core.llm_client import LLMClient
 from src.rag_api.config import get_settings
 
 settings = get_settings()
@@ -48,21 +47,11 @@ class QueryTransformer:
     
     def __init__(self, model: str = None):
         self.model = model or settings.OLLAMA_SUMMARY_MODEL
-        self._ollama_host = settings.OLLAMA_HOST
-        self._client: Optional[httpx.AsyncClient] = None
-    
-    @property
-    def client(self) -> httpx.AsyncClient:
-        """懒加载异步客户端，连接池复用"""
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=60.0)
-        return self._client
+        self.llm = LLMClient(model=self.model)
     
     async def close(self):
         """关闭连接"""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        await self.llm.close()
     
     async def transform(
         self, 
@@ -113,22 +102,7 @@ class QueryTransformer:
     
     async def _call_llm(self, prompt: str, max_tokens: int = 500) -> str:
         """调用 Ollama LLM（复用连接）"""
-        response = await self.client.post(
-            f"{self._ollama_host}/api/chat",
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "think": False,
-                "options": {
-                    "temperature": 0.7,
-                    "num_predict": max_tokens,
-                },
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data.get("message", {}).get("content", "").strip()
+        return await self.llm.chat(prompt, max_tokens=max_tokens)
     
     async def _hyde(self, query: str) -> TransformResult:
         """HyDE：生成假设性文档

@@ -37,7 +37,6 @@ class BM25Index:
     
     def __init__(self, project_id: str):
         self.project_id = project_id
-        self.corpus: List[str] = []  # 文档内容列表
         self.tokenized_corpus: List[List[str]] = []  # 分词后的文档列表
         self.chunk_ids: List[str] = []  # chunk_id 列表
         self._chunk_id_to_idx: Dict[str, int] = {}  # chunk_id -> 索引映射（加速查找）
@@ -71,12 +70,10 @@ class BM25Index:
             if chunk_id in self._chunk_id_to_idx:
                 # 更新现有文档
                 idx = self._chunk_id_to_idx[chunk_id]
-                self.corpus[idx] = content
                 self.tokenized_corpus[idx] = self.tokenize(content)
             else:
                 # 添加新文档
                 idx = len(self.chunk_ids)
-                self.corpus.append(content)
                 self.tokenized_corpus.append(self.tokenize(content))
                 self.chunk_ids.append(chunk_id)
                 self._chunk_id_to_idx[chunk_id] = idx
@@ -100,11 +97,9 @@ class BM25Index:
             for chunk_id, content in documents:
                 if chunk_id in self._chunk_id_to_idx:
                     idx = self._chunk_id_to_idx[chunk_id]
-                    self.corpus[idx] = content
                     self.tokenized_corpus[idx] = self.tokenize(content)
                 else:
                     idx = len(self.chunk_ids)
-                    self.corpus.append(content)
                     self.tokenized_corpus.append(self.tokenize(content))
                     self.chunk_ids.append(chunk_id)
                     self._chunk_id_to_idx[chunk_id] = idx
@@ -129,7 +124,6 @@ class BM25Index:
             idx = self._chunk_id_to_idx[chunk_id]
             
             # 删除元素
-            self.corpus.pop(idx)
             self.tokenized_corpus.pop(idx)
             self.chunk_ids.pop(idx)
             
@@ -169,7 +163,6 @@ class BM25Index:
             # 从后往前删除，避免索引变化
             indices_to_remove.sort(reverse=True)
             for idx in indices_to_remove:
-                self.corpus.pop(idx)
                 self.tokenized_corpus.pop(idx)
                 self.chunk_ids.pop(idx)
             
@@ -195,7 +188,7 @@ class BM25Index:
         query: str, 
         top_k: int = 20,
         score_threshold: float = 0.0
-    ) -> List[Tuple[str, float, str]]:
+    ) -> List[Tuple[str, float]]:
         """搜索
         
         优化：在锁内拷贝共享数据，在锁外执行 CPU 密集计算
@@ -206,15 +199,14 @@ class BM25Index:
             score_threshold: 分数阈值
             
         Returns:
-            List of (chunk_id, score, content)
+            List of (chunk_id, score)
         """
         # 在锁内拷贝共享数据
         with self._lock:
-            if not self.bm25 or not self.corpus:
+            if not self.bm25 or not self.chunk_ids:
                 return []
             bm25 = self.bm25
             chunk_ids = self.chunk_ids[:]
-            corpus = self.corpus[:]
         
         # 在锁外执行 CPU 密集计算
         query_tokens = self.tokenize(query)
@@ -226,7 +218,7 @@ class BM25Index:
         results = []
         for i, score in enumerate(scores):
             if score >= score_threshold:
-                results.append((chunk_ids[i], float(score), corpus[i]))
+                results.append((chunk_ids[i], float(score)))
         
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]
@@ -244,7 +236,6 @@ class BM25Index:
                 
                 data = {
                     "project_id": self.project_id,
-                    "corpus": self.corpus,
                     "tokenized_corpus": self.tokenized_corpus,
                     "chunk_ids": self.chunk_ids,
                 }
@@ -285,7 +276,6 @@ class BM25Index:
             with open(self._index_path, "rb") as f:
                 data = pickle.load(f)
             
-            self.corpus = data.get("corpus", [])
             self.tokenized_corpus = data.get("tokenized_corpus", [])
             self.chunk_ids = data.get("chunk_ids", [])
             
@@ -299,7 +289,7 @@ class BM25Index:
             
             self._dirty = False
             
-            logger.debug(f"BM25 索引已加载: {len(self.corpus)} 个文档")
+            logger.debug(f"BM25 索引已加载: {len(self.chunk_ids)} 个文档")
             return True
             
         except Exception as e:
@@ -308,7 +298,6 @@ class BM25Index:
     
     def clear(self) -> None:
         """清空索引"""
-        self.corpus.clear()
         self.tokenized_corpus.clear()
         self.chunk_ids.clear()
         self._chunk_id_to_idx.clear()
@@ -318,7 +307,7 @@ class BM25Index:
     @property
     def doc_count(self) -> int:
         """索引中的文档数量"""
-        return len(self.corpus)
+        return len(self.chunk_ids)
 
 
 class BM25IndexManager:

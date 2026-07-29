@@ -435,7 +435,7 @@ class FileSync:
     def __init__(self, db: Session, project_id: str):
         self.db = db
         self.project_id = project_id
-        self.doc_service = DocumentService(db)
+        self.doc_service = DocumentService()
         self.vector_store = VectorStore()
     
     def is_supported_file(self, file_path: Path) -> bool:

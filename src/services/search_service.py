@@ -285,7 +285,7 @@ class SearchService:
             
             # 转换为 SearchResult
             results = []
-            for chunk_id, score, content in hits:
+            for chunk_id, score in hits:
                 chunk = chunks_by_id.get(chunk_id)
                 if not chunk:
                     continue
@@ -301,7 +301,7 @@ class SearchService:
                 
                 results.append(
                     SearchResult(
-                        content=content,
+                        content=chunk.content,
                         score=score,
                         search_type="keyword",
                         metadata={

@@ -10,7 +10,6 @@ Query → 摘要搜索（找到相关文档）→ chunks 搜索（在这些文�
 
 import logging
 import hashlib
-import httpx
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ from datetime import datetime
 
 from src.rag_api.config import get_settings
 from src.core.embedding import EmbeddingService
+from src.core.llm_client import LLMClient
 from src.core.vector_store import VectorStore
 
 settings = get_settings()
@@ -46,32 +46,11 @@ class SummaryGenerator:
     
     def __init__(self, model: str = None):
         self.model = model or settings.OLLAMA_SUMMARY_MODEL
-        self._ollama_host = settings.OLLAMA_HOST
-        self._async_client: Optional[httpx.AsyncClient] = None
-        self._sync_client: Optional[httpx.Client] = None
-    
-    @property
-    def async_client(self) -> httpx.AsyncClient:
-        """懒加载异步客户端，连接池复用"""
-        if self._async_client is None:
-            self._async_client = httpx.AsyncClient(timeout=60)
-        return self._async_client
-    
-    @property
-    def sync_client(self) -> httpx.Client:
-        """懒加载同步客户端，连接池复用"""
-        if self._sync_client is None:
-            self._sync_client = httpx.Client(timeout=60)
-        return self._sync_client
+        self.llm = LLMClient(model=self.model)
     
     async def close(self):
         """关闭连接"""
-        if self._async_client:
-            await self._async_client.aclose()
-            self._async_client = None
-        if self._sync_client:
-            self._sync_client.close()
-            self._sync_client = None
+        await self.llm.close()
     
     async def generate_summary(
         self, 
@@ -113,53 +92,17 @@ class SummaryGenerator:
 摘要："""
 
         try:
-            # 使用复用的异步客户端
-            # 尝试 /api/chat（更稳定）
-            response = await self.async_client.post(
-                f"{self._ollama_host}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": 512,
-                    }
-                }
-            )
+            summary = await self.llm.chat(prompt, max_tokens=512, temperature=0.3)
             
-            if response.status_code == 404:
-                # 回退到 /api/generate
-                response = await self.async_client.post(
-                    f"{self._ollama_host}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.3,
-                            "num_predict": 512,
-                        }
-                    }
-                )
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                # /api/chat 返回格式
-                if "message" in data:
-                    summary = data["message"]["content"].strip()
-                else:
-                    # /api/generate 返回格式
-                    summary = data.get("response", "").strip()
-                
-                # 截断到最大长度
-                if len(summary) > max_length:
-                    summary = summary[:max_length] + "..."
-                
-                return summary
+            if not summary:
+                logger.warning("LLM 返回空摘要，回退到第一个 chunk")
+                return chunks[0][:200] + "..." if chunks else ""
+            
+            # 截断到最大长度
+            if len(summary) > max_length:
+                summary = summary[:max_length] + "..."
+            
+            return summary
                 
         except Exception as e:
             logger.error(f"生成摘要失败: {e}")
@@ -195,51 +138,16 @@ class SummaryGenerator:
 摘要："""
 
         try:
-            # 使用复用的同步客户端
-            # 尝试 /api/chat（更稳定）
-            response = self.sync_client.post(
-                f"{self._ollama_host}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": 512,
-                    }
-                }
-            )
+            summary = self.llm.chat_sync(prompt, max_tokens=512, temperature=0.3)
             
-            if response.status_code == 404:
-                # 回退到 /api/generate
-                response = self.sync_client.post(
-                    f"{self._ollama_host}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.3,
-                            "num_predict": 512,
-                        }
-                    }
-                )
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                # /api/chat 返回格式
-                if "message" in data:
-                    summary = data["message"]["content"].strip()
-                else:
-                    summary = data.get("response", "").strip()
-                
-                if len(summary) > max_length:
-                    summary = summary[:max_length] + "..."
-                
-                return summary
+            if not summary:
+                logger.warning("LLM 返回空摘要，回退到第一个 chunk")
+                return chunks[0][:200] + "..." if chunks else ""
+            
+            if len(summary) > max_length:
+                summary = summary[:max_length] + "..."
+            
+            return summary
                 
         except Exception as e:
             logger.error(f"生成摘要失败: {e}")

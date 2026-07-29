@@ -25,6 +25,7 @@ from src.rag_api.models.database import (
     ParseQueue,
     Project,
     get_db_session,
+    get_db_session_immediate,
 )
 
 settings = get_settings()
@@ -87,33 +88,49 @@ class ParseWorker:
 
     def _process_batch(self) -> int:
         """处理一批任务，返回处理数量"""
-        processed = 0
+        from sqlalchemy import text as sql_text
 
-        with get_db_session() as db:
-            # 原子领取任务：UPDATE ... WHERE status='pending' LIMIT batch_size
-            # SQLite 不支持 UPDATE RETURNING，用两步实现
-            pending_tasks = (
-                db.query(ParseQueue)
-                .filter(ParseQueue.status == "pending")
-                .order_by(ParseQueue.priority.asc(), ParseQueue.created_at.asc())
-                .limit(self.batch_size)
-                .all()
+        # 原子领取：UPDATE...RETURNING（单条 SQL，SQLite 保证原子性）
+        with get_db_session_immediate() as db:
+            result = db.execute(
+                sql_text("""
+                    UPDATE parse_queue
+                    SET status = 'running',
+                        worker_id = :worker_id,
+                        started_at = :started_at
+                    WHERE id IN (
+                        SELECT id FROM parse_queue
+                        WHERE status = 'pending'
+                        ORDER BY priority ASC, created_at ASC
+                        LIMIT :batch_size
+                    )
+                """),
+                {
+                    "worker_id": self.worker_id,
+                    "started_at": datetime.utcnow().isoformat(),
+                    "batch_size": self.batch_size,
+                },
             )
-
-            if not pending_tasks:
-                return 0
-
-            # 标记为 running
-            task_ids = []
-            for task in pending_tasks:
-                task.status = "running"
-                task.worker_id = self.worker_id
-                task.started_at = datetime.utcnow()
-                task_ids.append(task.id)
-
+            claimed = result.rowcount
             db.commit()
 
-        # 逐个处理（在独立 session 中，避免长事务）
+        if claimed == 0:
+            return 0
+
+        # 读取刚领取的任务
+        with get_db_session() as db:
+            tasks = (
+                db.query(ParseQueue)
+                .filter(
+                    ParseQueue.worker_id == self.worker_id,
+                    ParseQueue.status == "running",
+                )
+                .all()
+            )
+            task_ids = [t.id for t in tasks]
+
+        # 逐个处理
+        processed = 0
         for task_id in task_ids:
             try:
                 self._process_single_task(task_id)
@@ -191,7 +208,6 @@ class ParseWorker:
         file_type = parse_result.get("type", "document")
         file_format = parse_result.get("format", "unknown")
 
-        # 确定 doc_type
         doc_type_map = {
             "document": file_format,
             "audio": "audio",
@@ -199,42 +215,39 @@ class ParseWorker:
         }
         doc_type = doc_type_map.get(file_type, file_format)
 
+        # 从 parse_queue 获取 project_id（短事务）
         with get_db_session() as db:
-            # 从 parse_queue 获取 project_id
             task = db.query(ParseQueue).filter(ParseQueue.id == task_id).first()
             if not task:
                 return
             actual_project_id = task.project_id or project_id
 
-            doc_service = DocumentService(db)
+        # 复制文件到项目目录
+        source = Path(source_path)
+        project_dir = settings.PROJECTS_DIR / actual_project_id
+        project_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = project_dir / source.name
+        if dest_path.exists() and dest_path.resolve() != source.resolve():
+            file_hash = self._compute_hash(source)[:8]
+            dest_path = project_dir / f"{file_hash}_{source.name}"
 
-            # 复制文件到项目目录（用相对路径避免同名覆盖）
-            source = Path(source_path)
-            project_dir = settings.PROJECTS_DIR / actual_project_id
-            project_dir.mkdir(parents=True, exist_ok=True)
-            # 如果源文件在 watch_root 下，保留相对路径结构
-            # 否则用文件名（已有同名文件则跳过复制）
-            dest_path = project_dir / source.name
-            if dest_path.exists() and dest_path.resolve() != source.resolve():
-                # 同名但不同文件，用哈希前缀区分
-                file_hash = self._compute_hash(source)[:8]
-                dest_path = project_dir / f"{file_hash}_{source.name}"
-            
-            if not dest_path.exists() and source.exists():
-                import shutil
-                shutil.copy2(source, dest_path)
+        if not dest_path.exists() and source.exists():
+            import shutil
+            shutil.copy2(source, dest_path)
 
-            # 调 DocumentService 处理
-            result = doc_service.process_document(
-                file_path=dest_path,
-                doc_type=doc_type,
-                project_id=actual_project_id,
-                filename=source.name,
-                source_path=str(source),
-                metadata=metadata,
-            )
+        # 调 DocumentService（内部自管理事务）
+        doc_service = DocumentService()
+        result = doc_service.process_document(
+            file_path=dest_path,
+            doc_type=doc_type,
+            project_id=actual_project_id,
+            filename=source.name,
+            source_path=str(source),
+            metadata=metadata,
+        )
 
-            # 更新任务状态
+        # 更新任务状态（短事务）
+        with get_db_session() as db:
             task = db.query(ParseQueue).filter(ParseQueue.id == task_id).first()
             if task:
                 if result.success:
@@ -256,7 +269,6 @@ class ParseWorker:
                         f"[{self.worker_id}] 处理失败: {source.name}: "
                         f"{result.error_message}"
                     )
-
                 task.finished_at = datetime.utcnow()
                 db.commit()
 
