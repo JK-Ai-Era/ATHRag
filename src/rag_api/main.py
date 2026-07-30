@@ -42,6 +42,15 @@ async def lifespan(app: FastAPI):
             print("[Watcher] Stopped on shutdown")
     except Exception as e:
         print(f"[Watcher] Shutdown error: {e}")
+    
+    # 关闭 EmbeddingService 连接
+    try:
+        import src.core.embedding as emb_module
+        if hasattr(emb_module, '_embedding_service') and emb_module._embedding_service:
+            await emb_module._embedding_service.close()
+            print("[Embedding] Service closed on shutdown")
+    except Exception as e:
+        print(f"[Embedding] Shutdown error: {e}")
 
 
 app = FastAPI(

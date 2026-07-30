@@ -267,7 +267,8 @@ class TestEmbeddingService:
         
         # 验证客户端已关闭
         assert service._async_client is None
-        assert service._sync_client is None
+        # thread-local client 在 close() 中清理当前线程的实例
+        assert not hasattr(service._local, 'client') or service._local.client is None
         print("✅ 显式关闭成功")
     
     def test_no_del_method(self):

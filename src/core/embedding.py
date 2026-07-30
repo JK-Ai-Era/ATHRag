@@ -1,5 +1,6 @@
 """Embedding 服务"""
 
+import threading
 import asyncio
 import logging
 import sqlite3
@@ -42,7 +43,7 @@ class EmbeddingService:
         self.timeout = settings.OLLAMA_TIMEOUT
         self.embed_dim = settings.OLLAMA_EMBED_DIM
         self._async_client: Optional[httpx.AsyncClient] = None
-        self._sync_client: Optional[httpx.Client] = None
+        self._local = threading.local()  # thread-local 存储
     
     @property
     def async_client(self) -> httpx.AsyncClient:
@@ -53,10 +54,10 @@ class EmbeddingService:
     
     @property
     def sync_client(self) -> httpx.Client:
-        """懒加载同步客户端"""
-        if self._sync_client is None:
-            self._sync_client = httpx.Client(timeout=self.timeout)
-        return self._sync_client
+        """线程安全的同步客户端（每个线程独立实例）"""
+        if not hasattr(self._local, 'client') or self._local.client is None:
+            self._local.client = httpx.Client(timeout=self.timeout)
+        return self._local.client
     
     async def embed_text(self, text: str) -> List[float]:
         """对单个文本进行向量化（异步）
@@ -188,7 +189,7 @@ class EmbeddingService:
             raise  # 其他错误触发 retry
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def embed_batch(self, texts: List[str], batch_size: int = 10) -> List[List[float]]:
+    async def embed_batch(self, texts: List[str], batch_size: int = 10) -> Tuple[List[Optional[List[float]]], List[int]]:
         """批量向量化（异步）
         
         使用并发HTTP请求提高效率，每个批次内并行处理。
@@ -199,13 +200,13 @@ class EmbeddingService:
             batch_size: 每批次处理的数量，默认10
             
         Returns:
-            向量列表，失败的文本返回零向量
+            (results, failed_indices): results 中失败位置为 None，failed_indices 记录失败索引
         """
         if not texts:
-            return []
+            return [], []
         
-        results = [None] * len(texts)  # 预分配结果列表
-        failed_indices = []  # 记录失败的索引
+        results: List[Optional[List[float]]] = [None] * len(texts)
+        failed_indices: List[int] = []
         
         for i in range(0, len(texts), batch_size):
             batch_indices = list(range(i, min(i + batch_size, len(texts))))
@@ -219,16 +220,15 @@ class EmbeddingService:
                 if isinstance(result, Exception):
                     logger.warning(f"Embedding 失败 (索引 {idx}): {result}")
                     failed_indices.append(idx)
-                    results[idx] = [0.0] * self.embed_dim
                 else:
                     results[idx] = result
         
         if failed_indices:
             logger.warning(f"批量向量化完成，{len(failed_indices)}/{len(texts)} 个失败")
         
-        return results
+        return results, failed_indices
     
-    async def embed_batch_sync_fallback(self, texts: List[str]) -> List[List[float]]:
+    async def embed_batch_sync_fallback(self, texts: List[str]) -> Tuple[List[Optional[List[float]]], List[int]]:
         """批量向量化（使用线程池执行同步方法）
         
         当异步方法有问题时的备选方案。
@@ -236,16 +236,18 @@ class EmbeddingService:
         loop = asyncio.get_event_loop()
         executor = _get_executor()
         
-        results = []
-        for text in texts:
+        results: List[Optional[List[float]]] = [None] * len(texts)
+        failed_indices: List[int] = []
+        
+        for i, text in enumerate(texts):
             try:
                 result = await loop.run_in_executor(executor, self.embed_text_sync, text)
-                results.append(result)
+                results[i] = result
             except Exception as e:
                 logger.error(f"Embedding 失败: {e}")
-                results.append([0.0] * self.embed_dim)
+                failed_indices.append(i)
         
-        return results
+        return results, failed_indices
     
     async def health_check(self) -> bool:
         """检查 Ollama 服务健康状态"""
@@ -272,9 +274,11 @@ class EmbeddingService:
         if self._async_client:
             await self._async_client.aclose()
             self._async_client = None
-        if self._sync_client:
-            self._sync_client.close()
-            self._sync_client = None
+        # thread-local 客户端在各线程生命周期内自然回收
+        # 主动清理当前线程的 client
+        if hasattr(self._local, 'client') and self._local.client is not None:
+            self._local.client.close()
+            self._local.client = None
 
 
 # ============================================================================
@@ -461,4 +465,18 @@ def reset_failed_chunks(
     except Exception as e:
         logger.error(f"重置失败 chunks 失败: {e}")
         return 0
-    
+
+
+# ============================================================================
+# 全局单例管理
+# ============================================================================
+
+_embedding_service: Optional[EmbeddingService] = None
+
+
+def get_embedding_service() -> EmbeddingService:
+    """获取全局 EmbeddingService 单例"""
+    global _embedding_service
+    if _embedding_service is None:
+        _embedding_service = EmbeddingService()
+    return _embedding_service

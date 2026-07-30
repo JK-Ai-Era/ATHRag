@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, event
+from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, event, text as sql_text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker, scoped_session
@@ -168,6 +168,26 @@ def get_db_session() -> Generator[Session, None, None]:
     finally:
         db.close()
         ScopedSession.remove()  # 清理线程本地存储
+
+
+def get_db_session_immediate() -> Generator[Session, None, None]:
+    """使用 BEGIN IMMEDIATE 的数据库会话（防止并发写冲突）
+    
+    BEGIN IMMEDIATE 在事务开始时就获取写锁，防止并发写冲突。
+    适用于需要原子领取的场景（如 ParseWorker）。
+    """
+    db = ScopedSession()
+    # 设置 SQLite 的事务类型为 BEGIN IMMEDIATE
+    db.execute(sql_text("BEGIN IMMEDIATE"))
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+        ScopedSession.remove()
 
 
 def get_db_session_sync() -> Session:

@@ -76,16 +76,20 @@ class VectorStore:
             return False
 
     def delete_collection(self, project_id: str) -> bool:
-        """删除项目的 Collection"""
+        """删除项目的 Collection（包括摘要 Collection）"""
         collection_name = self._get_collection_name(project_id)
+        summary_name = f"{collection_name}_summaries"
 
-        try:
-            self.client.delete_collection(collection_name)
-            logger.info(f"Deleted collection: {collection_name}")
-            return True
-        except Exception as e:
-            logger.error(f"删除 Collection 失败: {e}")
-            return False
+        deleted_any = False
+        for name in [collection_name, summary_name]:
+            try:
+                self.client.delete_collection(name)
+                logger.info(f"Deleted collection: {name}")
+                deleted_any = True
+            except Exception as e:
+                logger.debug(f"删除 Collection {name} 跳过: {e}")
+        
+        return deleted_any
 
     def add_vector(
         self,

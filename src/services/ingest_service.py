@@ -25,7 +25,7 @@ class IngestService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.doc_service = DocumentService(db)
+        self.doc_service = DocumentService()
     
     async def upload_document(
         self,

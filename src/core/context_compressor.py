@@ -14,8 +14,7 @@ import re
 from typing import List, Optional
 from dataclasses import dataclass
 
-import httpx
-
+from src.core.llm_client import LLMClient
 from src.rag_api.config import get_settings
 from src.rag_api.models.schemas import SearchResult
 
@@ -40,8 +39,8 @@ class ContextCompressor:
     
     def __init__(self, model: str = None, use_llm: bool = True):
         self.model = model or settings.OLLAMA_COMPRESS_MODEL
-        self._ollama_host = settings.OLLAMA_HOST
         self.use_llm = use_llm
+        self.llm = LLMClient(model=self.model)
     
     async def compress(
         self,
@@ -119,23 +118,7 @@ class ContextCompressor:
 {content[:2000]}"""
         
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{self._ollama_host}/api/chat",
-                    json={
-                        "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "stream": False,
-                        "think": False,  # 禁用 thinking 模式
-                        "options": {
-                            "temperature": 0.1,
-                            "num_predict": 300,
-                        },
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                extracted = data.get("message", {}).get("content", "").strip()
+            extracted = await self.llm.chat(prompt, max_tokens=300, temperature=0.1)
             
             if extracted and extracted != "NONE" and len(extracted) > 20:
                 compression_ratio = len(extracted) / len(content)
