@@ -101,6 +101,70 @@ def get_provider(category: str, subcategory: Optional[str] = None) -> str:
     return cfg.get("provider", "")
 
 
+def _get_settings():
+    """延迟导入 settings，避免循环依赖"""
+    from src.rag_api.config import get_settings
+    return get_settings()
+
+
+def get_embedding_config() -> dict:
+    """获取 embedding 配置，models.yaml 优先，settings 兜底
+
+    Returns:
+        {"provider": str, "host": str, "model": str, "dimension": int, "timeout": int}
+    """
+    cfg = get_model_config("embedding")
+    s = _get_settings()
+    return {
+        "provider": cfg.get("provider", "ollama"),
+        "host": cfg.get("host", s.OLLAMA_HOST),
+        "model": cfg.get("model", s.OLLAMA_MODEL),
+        "dimension": cfg.get("dimension", s.OLLAMA_EMBED_DIM),
+        "timeout": cfg.get("timeout", s.OLLAMA_TIMEOUT),
+    }
+
+
+def get_llm_config(purpose: str = "summary") -> dict:
+    """获取 LLM 配置，models.yaml 优先，settings 兜底
+
+    Args:
+        purpose: "summary" 或 "compress"，区分不同用途的模型
+
+    Returns:
+        {"provider": str, "host": str, "model": str}
+    """
+    cfg = get_model_config("llm")
+    s = _get_settings()
+
+    # 优先从 llm.{purpose} 读取，再从 llm 顶层读取
+    purpose_cfg = cfg.get(purpose, {}) if isinstance(cfg.get(purpose), dict) else {}
+
+    # 根据 purpose 选择 settings 兜底值
+    if purpose == "compress":
+        fallback_model = s.OLLAMA_COMPRESS_MODEL
+    else:
+        fallback_model = s.OLLAMA_SUMMARY_MODEL
+
+    return {
+        "provider": purpose_cfg.get("provider", cfg.get("provider", "ollama")),
+        "host": purpose_cfg.get("host", cfg.get("host", s.OLLAMA_HOST)),
+        "model": purpose_cfg.get("model", cfg.get("model", fallback_model)),
+    }
+
+
+def get_reranker_config() -> dict:
+    """获取 reranker 配置，models.yaml 优先，硬编码兜底
+
+    Returns:
+        {"provider": str, "model": str}
+    """
+    cfg = get_model_config("reranker")
+    return {
+        "provider": cfg.get("provider", "ollama"),
+        "model": cfg.get("model", "bge-reranker-v2-m3"),
+    }
+
+
 def get_hardware_device() -> str:
     """检测硬件设备"""
     config = load_models_config()

@@ -15,12 +15,10 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from src.rag_api.config import get_settings
 from src.core.embedding import EmbeddingService
 from src.core.llm_client import LLMClient
 from src.core.vector_store import VectorStore
 
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
 import uuid
@@ -45,7 +43,9 @@ class SummaryGenerator:
     """
     
     def __init__(self, model: str = None):
-        self.model = model or settings.OLLAMA_SUMMARY_MODEL
+        from src.core.model_config import get_llm_config
+        _cfg = get_llm_config("summary")
+        self.model = model or _cfg["model"]
         self.llm = LLMClient(model=self.model)
     
     async def close(self):

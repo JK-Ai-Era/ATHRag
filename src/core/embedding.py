@@ -13,6 +13,7 @@ import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.rag_api.config import get_settings
+from src.core.model_config import get_embedding_config
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -38,10 +39,12 @@ class EmbeddingService:
     """
     
     def __init__(self):
-        self.host = settings.OLLAMA_HOST
-        self.model = settings.OLLAMA_MODEL
-        self.timeout = settings.OLLAMA_TIMEOUT
-        self.embed_dim = settings.OLLAMA_EMBED_DIM
+        _cfg = get_embedding_config()
+        self.provider = _cfg["provider"]
+        self.host = _cfg["host"]
+        self.model = _cfg["model"]
+        self.timeout = _cfg["timeout"]
+        self.embed_dim = _cfg["dimension"]
         self._async_client: Optional[httpx.AsyncClient] = None
         self._local = threading.local()  # thread-local 存储
     

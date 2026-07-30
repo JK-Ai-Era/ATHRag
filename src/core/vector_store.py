@@ -27,7 +27,8 @@ class VectorStore:
             timeout=settings.QDRANT_TIMEOUT,
             check_compatibility=False,  # 禁用版本检查
         )
-        self.vector_size = settings.OLLAMA_EMBED_DIM
+        from src.core.model_config import get_embedding_config
+        self.vector_size = get_embedding_config()["dimension"]
         self.collection_prefix = settings.QDRANT_COLLECTION_PREFIX
 
     def _get_collection_name(self, project_id: str) -> str:

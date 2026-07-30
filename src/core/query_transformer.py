@@ -15,9 +15,7 @@ from typing import List, Optional
 from dataclasses import dataclass
 
 from src.core.llm_client import LLMClient
-from src.rag_api.config import get_settings
 
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
@@ -46,8 +44,9 @@ class QueryTransformer:
     """
     
     def __init__(self, model: str = None):
-        self.model = model or settings.OLLAMA_SUMMARY_MODEL
-        self.llm = LLMClient(model=self.model)
+        # model_config 优先；LLMClient 内部也会从 model_config 读默认值
+        self.model = model
+        self.llm = LLMClient(model=model)
     
     async def close(self):
         """关闭连接"""

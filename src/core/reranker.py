@@ -214,10 +214,13 @@ class RerankerManager:
     @classmethod
     def get_reranker(
         cls,
-        model_name: str = "bge-reranker-v2-m3",
+        model_name: str = None,
         device: str = "cpu",
     ) -> Reranker:
         """获取全局 Reranker 实例"""
+        if model_name is None:
+            from src.core.model_config import get_reranker_config
+            model_name = get_reranker_config()["model"]
         config = {"model_name": model_name, "device": device}
         
         with cls._lock:
@@ -236,6 +239,6 @@ class RerankerManager:
 
 
 # 便捷函数
-def get_reranker(model_name: str = "bge-reranker-v2-m3") -> Reranker:
-    """获取 Reranker 实例"""
+def get_reranker(model_name: str = None) -> Reranker:
+    """获取 Reranker 实例（默认从 models.yaml 读取模型名）"""
     return RerankerManager.get_reranker(model_name=model_name)

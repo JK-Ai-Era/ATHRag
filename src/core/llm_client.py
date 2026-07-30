@@ -8,9 +8,8 @@ from typing import Optional
 
 import httpx
 
-from src.rag_api.config import get_settings
+from src.core.model_config import get_llm_config
 
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
@@ -18,8 +17,9 @@ class LLMClient:
     """Ollama LLM 统一客户端"""
 
     def __init__(self, model: str = None, timeout: float = 60.0):
-        self.model = model or settings.OLLAMA_SUMMARY_MODEL
-        self.host = settings.OLLAMA_HOST
+        _cfg = get_llm_config("summary")
+        self.model = model or _cfg["model"]
+        self.host = _cfg["host"]
         self.timeout = timeout
         self._async_client: Optional[httpx.AsyncClient] = None
         self._sync_client: Optional[httpx.Client] = None

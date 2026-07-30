@@ -15,10 +15,8 @@ from typing import List, Optional
 from dataclasses import dataclass
 
 from src.core.llm_client import LLMClient
-from src.rag_api.config import get_settings
 from src.rag_api.models.schemas import SearchResult
 
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +36,9 @@ class ContextCompressor:
     """
     
     def __init__(self, model: str = None, use_llm: bool = True):
-        self.model = model or settings.OLLAMA_COMPRESS_MODEL
+        from src.core.model_config import get_llm_config
+        _cfg = get_llm_config("compress")
+        self.model = model or _cfg["model"]
         self.use_llm = use_llm
         self.llm = LLMClient(model=self.model)
     
