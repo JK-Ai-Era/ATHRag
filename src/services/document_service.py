@@ -292,47 +292,78 @@ class DocumentService:
                 ChunkModel.document_id == doc_id
             ).order_by(ChunkModel.chunk_index).all()
             
-            for idx, chunk in enumerate(chunks):
-                try:
-                    # 跳过已有向量的 chunk
-                    if chunk.vector_id:
-                        success_count += 1
-                        continue
-                    
-                    # 嵌入
-                    emb = self.embedding.embed_text_sync(chunk.content)
-                    
-                    # 构建 payload
-                    metadata = json.loads(chunk.metadata_json) if chunk.metadata_json else {}
-                    payload = {
-                        "chunk_id": chunk.id,
-                        "document_id": doc_id,
-                        "content": chunk.content,
-                        "filename": filename,
-                        "source_path": source_path,
-                        "start_line": metadata.get("start_line"),
-                        "end_line": metadata.get("end_line"),
-                        "symbols": metadata.get("symbols", []),
-                    }
-                    
-                    # 写入 Qdrant
-                    vector_id = self.vector_store.add_vector(
-                        project_id=project_id,
-                        vector=emb,
-                        payload=payload,
-                    )
-                    
-                    if vector_id:
-                        chunk.vector_id = vector_id
-                        success_count += 1
-                    else:
-                        failed_count += 1
-                        errors.append(f"chunk {idx}: 向量写入返回空 ID")
-                        
-                except Exception as e:
+            # 过滤出需要向量化的 chunk
+            pending_chunks = [(idx, chunk) for idx, chunk in enumerate(chunks) if not chunk.vector_id]
+            skipped = len(chunks) - len(pending_chunks)
+            success_count = skipped  # 已有向量的算成功
+            
+            if not pending_chunks:
+                return {"success_count": success_count, "failed_count": 0, "error_details": None}
+            
+            # 批量 embedding（并发请求，大幅加速）
+            texts = [chunk.content for _, chunk in pending_chunks]
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 已有事件循环，用 run_in_executor 调同步回退
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        results = list(executor.map(self.embedding.embed_text_sync, texts))
+                else:
+                    results = loop.run_until_complete(self.embedding.embed_batch(texts))
+                    if isinstance(results, tuple):
+                        results = list(results[0])
+            except RuntimeError:
+                # 没有事件循环，用线程池并发
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    results = list(executor.map(self.embedding.embed_text_sync, texts))
+            
+            # 批量写入 Qdrant
+            vectors_to_write = []
+            payloads_to_write = []
+            chunks_to_update = []
+            
+            for (idx, chunk), emb in zip(pending_chunks, results):
+                if emb is None:
                     failed_count += 1
-                    errors.append(f"chunk {idx}: {str(e)[:80]}")
-                    logger.warning(f"[{doc_id}] chunk {idx} 向量化失败: {e}")
+                    errors.append(f"chunk {idx}: embedding 返回空")
+                    continue
+                
+                metadata = json.loads(chunk.metadata_json) if chunk.metadata_json else {}
+                payload = {
+                    "chunk_id": chunk.id,
+                    "document_id": doc_id,
+                    "content": chunk.content,
+                    "filename": filename,
+                    "source_path": source_path,
+                    "start_line": metadata.get("start_line"),
+                    "end_line": metadata.get("end_line"),
+                    "symbols": metadata.get("symbols", []),
+                }
+                vectors_to_write.append(emb)
+                payloads_to_write.append(payload)
+                chunks_to_update.append((idx, chunk))
+            
+            # 批量写入向量
+            if vectors_to_write:
+                try:
+                    vector_ids = self.vector_store.add_vectors_batch(
+                        project_id=project_id,
+                        vectors=vectors_to_write,
+                        payloads=payloads_to_write,
+                    )
+                    for (idx, chunk), vid in zip(chunks_to_update, vector_ids):
+                        if vid:
+                            chunk.vector_id = vid
+                            success_count += 1
+                        else:
+                            failed_count += 1
+                            errors.append(f"chunk {idx}: 向量写入返回空 ID")
+                except Exception as e:
+                    failed_count += len(vectors_to_write)
+                    errors.append(f"批量向量写入失败: {str(e)[:80]}")
             
             # 批量 commit 所有 vector_id 更新
             db.commit()
@@ -363,6 +394,7 @@ class DocumentService:
         vector_result: Dict[str, Any],
     ) -> None:
         """更新文档状态和项目统计，一个事务完成。"""
+        from sqlalchemy import text as sql_text
         with get_db_session() as db:
             doc = db.query(DocumentModel).filter(DocumentModel.id == doc_id).first()
             if doc:
@@ -371,13 +403,17 @@ class DocumentService:
                 if vector_result.get("error_details"):
                     doc.error_message = vector_result["error_details"]
             
-            project = db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
-            if project:
-                if is_new:
-                    project.document_count += 1
-                else:
-                    project.chunk_count = max(0, project.chunk_count - old_chunk_count)
-                project.chunk_count += chunk_count
+            # 用原子 SQL 增量更新计数器，避免多 worker 并发丢失更新
+            if is_new:
+                db.execute(
+                    sql_text("UPDATE projects SET document_count = document_count + 1, chunk_count = chunk_count + :cnt WHERE id = :pid"),
+                    {"cnt": chunk_count, "pid": project_id},
+                )
+            else:
+                db.execute(
+                    sql_text("UPDATE projects SET chunk_count = chunk_count - :old + :new WHERE id = :pid"),
+                    {"old": old_chunk_count, "new": chunk_count, "pid": project_id},
+                )
             
             db.commit()
     

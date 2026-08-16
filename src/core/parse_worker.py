@@ -60,6 +60,9 @@ class ParseWorker:
             logger.warning(f"Worker {self.worker_id} 已在运行")
             return
 
+        # 启动前清理：重置超过 10 分钟的 stale running 任务
+        self._cleanup_stale_tasks()
+
         self._running = True
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -86,6 +89,204 @@ class ParseWorker:
             except Exception as e:
                 logger.error(f"Worker 循环异常: {e}")
                 time.sleep(self.poll_interval)
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
+
+    def _cleanup_stale_tasks(self, stale_minutes: int = 10):
+        """清理超过指定时间的 running 任务（死 worker 残留）"""
+        from sqlalchemy import text as sql_text
+        from datetime import datetime, timedelta
+        try:
+            db = get_db_session_sync()
+            try:
+                cutoff = (datetime.utcnow() - timedelta(minutes=stale_minutes)).isoformat()
+                result = db.execute(
+                    sql_text("""UPDATE parse_queue SET status='pending', worker_id=NULL, 
+                              started_at=NULL, error_msg='stale task reset'
+                              WHERE status='running' AND started_at < :cutoff"""),
+                    {"cutoff": cutoff},
+                )
+                if result.rowcount > 0:
+                    logger.info(f"清理 {result.rowcount} 个 stale running 任务（>{stale_minutes}分钟）")
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"清理 stale 任务失败: {e}")
 
     def _process_batch(self) -> int:
         """处理一批任务，返回处理数量"""
