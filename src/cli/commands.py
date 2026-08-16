@@ -200,7 +200,7 @@ def search(
 @app.command()
 def serve(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="监听地址"),
-    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+    port: int = typer.Option(16250, "--port", "-p", help="监听端口"),
     reload: bool = typer.Option(False, "--reload", help="开发模式（热重载）"),
 ):
     """启动 API 服务"""

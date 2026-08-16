@@ -9,7 +9,7 @@ import yaml
 
 DEFAULT_CONFIG = {
     "api": {
-        "url": "http://localhost:8000",
+        "url": "http://localhost:16250",
         "timeout": 30,
     },
     "services": {
@@ -101,7 +101,7 @@ class Config:
     @property
     def api_url(self) -> str:
         """获取 API URL"""
-        return self.get("api.url", "http://localhost:8000")
+        return self.get("api.url", "http://localhost:16250")
 
     @property
     def api_timeout(self) -> int:

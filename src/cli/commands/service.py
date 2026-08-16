@@ -14,7 +14,7 @@ console = Console()
 
 
 SERVICES = [
-    {"name": "API", "host": "localhost", "port": 8000, "launchctl": "api"},
+    {"name": "API", "host": "localhost", "port": 16250, "launchctl": "api"},
     {"name": "Qdrant", "host": "localhost", "port": 6333, "launchctl": "qdrant"},
     {"name": "Web UI", "host": "localhost", "port": 3000, "launchctl": "web"},
     {"name": "Ollama", "host": "localhost", "port": 11434, "launchctl": None},
@@ -92,7 +92,7 @@ def start():
             console.print("[red]✗[/red]")
 
     console.print("\n[bold]访问地址:[/bold]")
-    console.print("  API 文档: http://localhost:8000/docs")
+    console.print("  API 文档: http://localhost:16250/docs")
     console.print("  Web UI:   http://localhost:3000")
 
 

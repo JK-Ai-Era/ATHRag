@@ -115,7 +115,7 @@ def info():
     from src.cli.utils import check_service_port
     console.print("\n[bold]服务端口:[/bold]")
     services = [
-        ("API", "localhost", 8000),
+        ("API", "localhost", 16250),
         ("Qdrant", "localhost", 6333),
         ("Web UI", "localhost", 3000),
         ("Ollama", "localhost", 11434),

@@ -58,8 +58,8 @@ fi
 
 echo ""
 echo "🌐 启动 API 服务..."
-echo "   地址: http://localhost:8000"
-echo "   文档: http://localhost:8000/docs"
+echo "   地址: http://localhost:16250"
+echo "   文档: http://localhost:16250/docs"
 echo ""
 echo "按 Ctrl+C 停止服务"
 echo ""
@@ -77,4 +77,4 @@ cleanup() {
 trap cleanup INT TERM
 
 # 启动 API
-exec uvicorn src.rag_api.main:app --host 0.0.0.0 --port 8000 --reload
+exec uvicorn src.rag_api.main:app --host 0.0.0.0 --port 16250 --reload

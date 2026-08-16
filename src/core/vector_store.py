@@ -103,6 +103,9 @@ class VectorStore:
         collection_name = self._get_collection_name(project_id)
         point_id = vector_id or str(uuid.uuid4())
 
+        # 确保 collection 存在
+        self.create_collection(project_id)
+
         try:
             self.client.upsert(
                 collection_name=collection_name,
@@ -140,6 +143,9 @@ class VectorStore:
             raise ValueError("vectors 和 payloads 长度不一致")
         
         collection_name = self._get_collection_name(project_id)
+        
+        # 确保 collection 存在
+        self.create_collection(project_id)
         
         # 尝试批量添加
         try:
@@ -278,6 +284,8 @@ class VectorStore:
                 if offset is None:
                     break
                     
+        except UnexpectedResponse:
+            logger.debug(f"Collection {collection_name} 不存在，跳过获取向量ID")
         except Exception as e:
             logger.error(f"获取向量ID列表失败: {e}")
         

@@ -27,8 +27,8 @@ import time
 from pathlib import Path
 from typing import List
 
-from src.dispatcher import ParseDispatcher
-from src.contract import ParseResult, error_result
+from doc_analyzer.dispatcher import ParseDispatcher
+from doc_analyzer.contract import ParseResult, error_result
 
 logger = logging.getLogger("doc-analyze")
 

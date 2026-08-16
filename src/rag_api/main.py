@@ -17,6 +17,7 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时：检查是否自动启动 Watcher
+    parse_worker = None
     auto_start = os.getenv("WATCHER_AUTO_START", "true").lower() == "true"
     if auto_start:
         try:
@@ -31,7 +32,24 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[Watcher] Auto-start error: {e}")
     
+    # 启动 ParseWorker 消费解析队列
+    try:
+        from src.core.parse_worker import ParseWorker
+        parse_worker = ParseWorker()
+        parse_worker.start()
+        print(f"[ParseWorker] Auto-started: {parse_worker.worker_id}")
+    except Exception as e:
+        print(f"[ParseWorker] Auto-start error: {e}")
+    
     yield
+    
+    # 关闭时：停止 ParseWorker
+    try:
+        if parse_worker:
+            parse_worker.stop()
+            print("[ParseWorker] Stopped on shutdown")
+    except Exception as e:
+        print(f"[ParseWorker] Shutdown error: {e}")
     
     # 关闭时：停止 Watcher
     try:

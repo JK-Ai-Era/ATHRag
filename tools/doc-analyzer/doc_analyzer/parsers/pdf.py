@@ -12,9 +12,9 @@ import logging
 import subprocess
 from pathlib import Path
 
-from src.contract import ParseResult, error_result
-from src.model_config import get_model_config
-from src.parsers.base import BaseParser
+from doc_analyzer.contract import ParseResult, error_result
+from doc_analyzer.model_config import get_model_config
+from doc_analyzer.parsers.base import BaseParser
 
 logger = logging.getLogger(__name__)
 

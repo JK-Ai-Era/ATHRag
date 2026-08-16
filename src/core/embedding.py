@@ -396,24 +396,23 @@ def reset_failed_chunks(
         重置的数量
     """
     from src.rag_api.models.database import Chunk as ChunkModel, get_db_session
-    from sqlalchemy import update as sql_update
     
     try:
         with get_db_session() as db:
-            stmt = sql_update(ChunkModel).where(
+            query = db.query(ChunkModel).filter(
                 ChunkModel.vector_status == "failed"
-            ).values(
-                vector_status="pending",
-                vector_error=None,
             )
             
             if chunk_ids:
-                stmt = stmt.where(ChunkModel.id.in_(chunk_ids))
+                query = query.filter(ChunkModel.id.in_(chunk_ids))
             elif project_id:
-                stmt = stmt.where(ChunkModel.project_id == project_id)
+                query = query.filter(ChunkModel.project_id == project_id)
             
-            result = db.execute(stmt)
-            count = result.rowcount
+            chunks = query.all()
+            count = len(chunks)
+            for c in chunks:
+                c.vector_status = "pending"
+                c.vector_error = None
             
             logger.info(f"重置 {count} 个失败 chunks 为 pending")
             return count

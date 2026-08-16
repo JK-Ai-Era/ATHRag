@@ -26,6 +26,7 @@ from src.rag_api.models.database import (
     Project,
     get_db_session,
     get_db_session_immediate,
+    get_db_session_sync,
 )
 
 settings = get_settings()
@@ -91,7 +92,8 @@ class ParseWorker:
         from sqlalchemy import text as sql_text
 
         # 原子领取：UPDATE...RETURNING（单条 SQL，SQLite 保证原子性）
-        with get_db_session_immediate() as db:
+        db = get_db_session_sync()
+        try:
             result = db.execute(
                 sql_text("""
                     UPDATE parse_queue
@@ -113,12 +115,18 @@ class ParseWorker:
             )
             claimed = result.rowcount
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
         if claimed == 0:
             return 0
 
         # 读取刚领取的任务
-        with get_db_session() as db:
+        db = get_db_session_sync()
+        try:
             tasks = (
                 db.query(ParseQueue)
                 .filter(
@@ -128,6 +136,8 @@ class ParseWorker:
                 .all()
             )
             task_ids = [t.id for t in tasks]
+        finally:
+            db.close()
 
         # 逐个处理
         processed = 0
@@ -143,7 +153,8 @@ class ParseWorker:
 
     def _process_single_task(self, task_id: str):
         """处理单个任务"""
-        with get_db_session() as db:
+        db = get_db_session_sync()
+        try:
             task = db.query(ParseQueue).filter(ParseQueue.id == task_id).first()
             if not task:
                 return
@@ -177,6 +188,8 @@ class ParseWorker:
                 task.finished_at = datetime.utcnow()
                 db.commit()
                 return
+        finally:
+            db.close()
 
         # 调 CLI 解析器（session 已关闭，用局部变量）
         logger.info(f"[{self.worker_id}] 解析: {file_path.name}")
@@ -216,11 +229,14 @@ class ParseWorker:
         doc_type = doc_type_map.get(file_type, file_format)
 
         # 从 parse_queue 获取 project_id（短事务）
-        with get_db_session() as db:
+        db = get_db_session_sync()
+        try:
             task = db.query(ParseQueue).filter(ParseQueue.id == task_id).first()
             if not task:
                 return
             actual_project_id = task.project_id or project_id
+        finally:
+            db.close()
 
         # 复制文件到项目目录
         source = Path(source_path)
@@ -247,7 +263,8 @@ class ParseWorker:
         )
 
         # 更新任务状态（短事务）
-        with get_db_session() as db:
+        db = get_db_session_sync()
+        try:
             task = db.query(ParseQueue).filter(ParseQueue.id == task_id).first()
             if task:
                 if result.success:
@@ -271,10 +288,13 @@ class ParseWorker:
                     )
                 task.finished_at = datetime.utcnow()
                 db.commit()
+        finally:
+            db.close()
 
     def _mark_task_failed(self, task_id: str, error_msg: str):
         """标记任务失败，支持重试"""
-        with get_db_session() as db:
+        db = get_db_session_sync()
+        try:
             task = db.query(ParseQueue).filter(ParseQueue.id == task_id).first()
             if not task:
                 return
@@ -295,6 +315,8 @@ class ParseWorker:
                 logger.error(f"任务 {task_id} 最终失败: {error_msg}")
 
             db.commit()
+        finally:
+            db.close()
 
     @staticmethod
     def _compute_hash(file_path: Path) -> str:
@@ -338,7 +360,8 @@ class ParseWorker:
         except Exception:
             file_hash = ""
 
-        with get_db_session() as db:
+        db = get_db_session_sync()
+        try:
             # 空哈希（文件不存在）用文件路径+时间戳作为哈希
             if not file_hash:
                 import time
@@ -371,3 +394,5 @@ class ParseWorker:
 
             logger.info(f"入队: {file_path.name} → task={task.id}")
             return task.id
+        finally:
+            db.close()

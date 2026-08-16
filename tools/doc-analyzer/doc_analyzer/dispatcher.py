@@ -17,9 +17,9 @@ from typing import Dict, List, Optional, Set
 
 import yaml
 
-from src.contract import ParseResult, error_result, validate_output
-from src.parsers import get_all_parsers, list_parser_names
-from src.parsers.base import BaseParser
+from doc_analyzer.contract import ParseResult, error_result, validate_output
+from doc_analyzer.parsers import get_all_parsers, list_parser_names
+from doc_analyzer.parsers.base import BaseParser
 
 logger = logging.getLogger(__name__)
 

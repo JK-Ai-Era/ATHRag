@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     CONTEXT_COMPRESS_USE_LLM: bool = True  # 是否使用 LLM 压缩（false 则用规则压缩）
     CONTEXT_COMPRESS_MAX_CHUNKS: int = 5  # 最多压缩的 chunk 数量
     
+    # Watcher 配置
+    WATCHER_ROOT: Path = Path.home() / "Projects"  # 监听根目录
+
     # MCP 配置
     MCP_SERVER_NAME: str = "ATHRag"
     MCP_TRANSPORT: str = "stdio"

@@ -20,8 +20,8 @@ import tokenize
 from pathlib import Path
 from typing import List, Optional
 
-from src.contract import ParseResult, error_result
-from src.parsers.base import BaseParser
+from doc_analyzer.contract import ParseResult, error_result
+from doc_analyzer.parsers.base import BaseParser
 
 logger = logging.getLogger(__name__)
 

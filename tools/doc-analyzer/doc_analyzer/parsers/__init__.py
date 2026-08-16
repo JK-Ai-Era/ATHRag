@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Type
 
-from src.parsers.base import BaseParser
+from doc_analyzer.parsers.base import BaseParser
 
 # 解析器注册表：parser_name → parser class
 _REGISTRY: Dict[str, Type[BaseParser]] = {}
@@ -34,11 +34,11 @@ def list_parser_names() -> List[str]:
 
 
 # 导入各解析器模块以触发注册
-from src.parsers.pdf import PDFParser          # noqa: F401, E402
-from src.parsers.office import OfficeParser    # noqa: F401, E402
-from src.parsers.image import ImageParser      # noqa: F401, E402
-from src.parsers.text import TextParser, MarkdownParser  # noqa: F401, E402
-from src.parsers.code import CodeParser        # noqa: F401, E402
+from doc_analyzer.parsers.pdf import PDFParser          # noqa: F401, E402
+from doc_analyzer.parsers.office import OfficeParser    # noqa: F401, E402
+from doc_analyzer.parsers.image import ImageParser      # noqa: F401, E402
+from doc_analyzer.parsers.text import TextParser, MarkdownParser  # noqa: F401, E402
+from doc_analyzer.parsers.code import CodeParser        # noqa: F401, E402
 
 # 注册内置解析器
 register_parser(PDFParser)

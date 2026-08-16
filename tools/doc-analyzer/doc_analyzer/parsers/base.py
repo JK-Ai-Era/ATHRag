@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
 
-from src.contract import ParseResult
+from doc_analyzer.contract import ParseResult
 
 logger = logging.getLogger(__name__)
 

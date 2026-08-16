@@ -11,9 +11,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from src.contract import ParseResult, error_result
-from src.model_config import get_model_config
-from src.parsers.base import BaseParser
+from doc_analyzer.contract import ParseResult, error_result
+from doc_analyzer.model_config import get_model_config
+from doc_analyzer.parsers.base import BaseParser
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class OfficeParser(BaseParser):
 
     def _parse_with_unstructured(self, file_path: Path, ext: str) -> ParseResult:
         """使用 Unstructured 解析"""
-        from src.parsers.unstructured_parser import UnstructuredOfficeParser
+        from doc_analyzer.parsers.unstructured_parser import UnstructuredOfficeParser
 
         parser = UnstructuredOfficeParser()
 
