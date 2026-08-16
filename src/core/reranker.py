@@ -138,15 +138,22 @@ class Reranker:
             # 批量打分
             scores = self._model.predict(pairs, batch_size=batch_size)
             
-            # 更新分数并排序
-            for i, score in enumerate(scores):
-                results[i].score = float(score)
-                results[i].search_type = "reranked"
+            # 创建新的 SearchResult 对象（不修改输入）
+            reranked = []
+            for i, result in enumerate(results):
+                reranked.append(SearchResult(
+                    content=result.content,
+                    score=float(scores[i]),
+                    search_type="reranked",
+                    metadata=result.metadata,
+                    document_id=result.document_id,
+                    chunk_id=result.chunk_id,
+                ))
             
             # 按分数降序排序
-            results.sort(key=lambda x: x.score, reverse=True)
+            reranked.sort(key=lambda x: x.score, reverse=True)
             
-            return results[:top_k]
+            return reranked[:top_k]
             
         except Exception as e:
             logger.error(f"重排序失败: {e}")

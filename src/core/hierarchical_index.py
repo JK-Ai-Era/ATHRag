@@ -15,9 +15,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from src.core.embedding import EmbeddingService
+from src.core.embedding import get_embedding_service
 from src.core.llm_client import LLMClient
-from src.core.vector_store import VectorStore
+from src.core.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -164,8 +164,8 @@ class HierarchicalIndex:
     SUMMARY_SUFFIX = "_summaries"
     
     def __init__(self):
-        self.embedding = EmbeddingService()
-        self.vector_store = VectorStore()
+        self.embedding = get_embedding_service()
+        self.vector_store = get_vector_store()
         self.summary_generator = SummaryGenerator()
     
     def _get_summary_collection_name(self, project_id: str) -> str:
@@ -416,8 +416,8 @@ class HierarchicalSearchService:
     
     def __init__(self):
         self.hierarchical_index = HierarchicalIndex()
-        self.vector_store = VectorStore()
-        self.embedding = EmbeddingService()
+        self.vector_store = get_vector_store()
+        self.embedding = get_embedding_service()
     
     async def search(
         self,

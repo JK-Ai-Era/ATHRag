@@ -21,8 +21,8 @@ from src.rag_api.models.database import Document as DocumentModel
 from src.rag_api.models.database import Project as ProjectModel
 from src.core.chunker import TextChunker
 from src.core.document_processor import DocumentProcessor
-from src.core.embedding import EmbeddingService
-from src.core.vector_store import VectorStore
+from src.core.embedding import get_embedding_service
+from src.core.vector_store import get_vector_store
 from src.services.document_service import DocumentService
 # 从统一配置导入文件类型定义
 from src.core.comment_extractor import (
@@ -82,7 +82,7 @@ class ProjectMapping:
         self.db.refresh(project)
         
         # 创建 Qdrant Collection
-        vector_store = VectorStore()
+        vector_store = get_vector_store()
         vector_store.create_collection(str(project.id))
         
         logger.info(f"Created new project '{folder_name}' with ID {project.id}")
@@ -160,7 +160,7 @@ class ProjectMapping:
         project_id = project.id
         
         # 删除 Qdrant Collection
-        vector_store = VectorStore()
+        vector_store = get_vector_store()
         vector_store.delete_collection(str(project_id))
         
         # 删除项目文件目录
@@ -188,7 +188,7 @@ class ConsistencyChecker:
         self.project_id = project_id
         self.watch_root = Path(watch_root)
         self.project_dir = settings.PROJECTS_DIR / project_id
-        self.vector_store = VectorStore()
+        self.vector_store = get_vector_store()
         self.stats = {"orphaned_files": 0, "missing_files": 0, "untracked_files": 0, "cleaned": 0, "orphan_vectors": 0}
     
     def check_and_fix(self) -> Dict[str, Any]:
@@ -436,7 +436,7 @@ class FileSync:
         self.db = db
         self.project_id = project_id
         self.doc_service = DocumentService()
-        self.vector_store = VectorStore()
+        self.vector_store = get_vector_store()
     
     def is_supported_file(self, file_path: Path) -> bool:
         """检查文件是否是支持的格式（使用统一配置）"""

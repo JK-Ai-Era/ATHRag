@@ -70,13 +70,16 @@ class WatcherManager:
         初始化监控管理器
 
         Args:
-            projects_root: 项目根目录,默认 ~/Projects
+            projects_root: 项目根目录,默认从配置 WATCHER_ROOT 读取
             debounce_interval: 事件防抖间隔(秒)
         """
         if self._initialized:
             return
 
-        self.projects_root = Path(projects_root or Path.home() / "Projects").resolve()
+        if projects_root is None:
+            from src.rag_api.config import get_settings
+            projects_root = get_settings().WATCHER_ROOT
+        self.projects_root = Path(projects_root).expanduser().resolve()
         self.debounce_interval = debounce_interval
 
         self._observer: Optional[Observer] = None
@@ -822,9 +825,9 @@ class WatcherManager:
     def _check_qdrant_health(self) -> None:
         """检查 Qdrant 健康"""
         try:
-            from src.core.vector_store import VectorStore
+            from src.core.vector_store import get_vector_store
             from src.rag_api.models.database import Project, Chunk
-            vector_store = VectorStore()
+            vector_store = get_vector_store()
 
             # 检查每个项目的向量索引状态
             for project_name, handler in list(self._project_handlers.items()):

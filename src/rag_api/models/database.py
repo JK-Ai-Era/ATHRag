@@ -91,6 +91,10 @@ class Chunk(Base):
     content = Column(Text, nullable=False)
     chunk_index = Column(Integer, nullable=False)
     vector_id = Column(String(100), nullable=True)  # Qdrant中的向量ID
+    vector_status = Column(String(20), default="pending")  # pending / success / failed
+    vector_error = Column(Text, nullable=True)
+    vector_retry_count = Column(Integer, default=0)
+    last_vector_attempt = Column(DateTime, nullable=True)
     metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

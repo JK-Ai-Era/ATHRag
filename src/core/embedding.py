@@ -3,7 +3,6 @@
 import threading
 import asyncio
 import logging
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -292,7 +291,6 @@ def update_chunk_vector_status(
     chunk_id: str,
     status: str,
     error: Optional[str] = None,
-    db_path: Optional[Path] = None
 ) -> bool:
     """
     更新 chunk 的向量状态
@@ -301,47 +299,34 @@ def update_chunk_vector_status(
         chunk_id: Chunk ID
         status: 'pending' | 'success' | 'failed'
         error: 错误信息（失败时）
-        db_path: 数据库路径，默认从配置读取
         
     Returns:
         是否更新成功
     """
-    if db_path is None:
-        db_path = settings.DB_PATH
+    from src.rag_api.models.database import Chunk as ChunkModel, get_db_session
+    
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        now = datetime.utcnow()
         
-        now = datetime.utcnow().isoformat()
+        with get_db_session() as db:
+            chunk = db.query(ChunkModel).filter(ChunkModel.id == chunk_id).first()
+            if not chunk:
+                logger.warning(f"Chunk 不存在: {chunk_id}")
+                return False
+            
+            chunk.last_vector_attempt = now
+            
+            if status == "success":
+                chunk.vector_status = "success"
+                chunk.vector_error = None
+            elif status == "failed":
+                chunk.vector_status = "failed"
+                chunk.vector_error = error[:200] if error else None
+                chunk.vector_retry_count = (chunk.vector_retry_count or 0) + 1
+            else:  # pending
+                chunk.vector_status = "pending"
+                chunk.vector_error = None
         
-        if status == "success":
-            cursor.execute("""
-                UPDATE chunks 
-                SET vector_status = 'success',
-                    vector_error = NULL,
-                    last_vector_attempt = ?
-                WHERE id = ?
-            """, (now, chunk_id))
-        elif status == "failed":
-            cursor.execute("""
-                UPDATE chunks 
-                SET vector_status = 'failed',
-                    vector_error = ?,
-                    vector_retry_count = vector_retry_count + 1,
-                    last_vector_attempt = ?
-                WHERE id = ?
-            """, (error[:200] if error else None, now, chunk_id))
-        else:  # pending
-            cursor.execute("""
-                UPDATE chunks 
-                SET vector_status = 'pending',
-                    vector_error = NULL,
-                    last_vector_attempt = ?
-                WHERE id = ?
-            """, (now, chunk_id))
-        
-        conn.commit()
-        conn.close()
         return True
         
     except Exception as e:
@@ -353,7 +338,6 @@ def get_failed_chunks(
     project_id: Optional[str] = None,
     max_retry: int = 3,
     limit: int = 100,
-    db_path: Optional[Path] = None
 ) -> List[dict]:
     """
     获取向量失败的 chunks
@@ -362,49 +346,35 @@ def get_failed_chunks(
         project_id: 项目 ID（可选）
         max_retry: 最大重试次数
         limit: 最大返回数
-        db_path: 数据库路径，默认从配置读取
         
     Returns:
         [{"id": str, "project_id": str, "error": str, "retry_count": int}, ...]
     """
-    if db_path is None:
-        db_path = settings.DB_PATH
+    from src.rag_api.models.database import Chunk as ChunkModel, get_db_session
+    
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        if project_id:
-            cursor.execute("""
-                SELECT id, project_id, vector_error, vector_retry_count, last_vector_attempt
-                FROM chunks
-                WHERE project_id = ? 
-                AND vector_status = 'failed'
-                AND vector_retry_count < ?
-                ORDER BY last_vector_attempt DESC
-                LIMIT ?
-            """, (project_id, max_retry, limit))
-        else:
-            cursor.execute("""
-                SELECT id, project_id, vector_error, vector_retry_count, last_vector_attempt
-                FROM chunks
-                WHERE vector_status = 'failed'
-                AND vector_retry_count < ?
-                ORDER BY last_vector_attempt DESC
-                LIMIT ?
-            """, (max_retry, limit))
-        
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                "id": row[0],
-                "project_id": row[1],
-                "error": row[2],
-                "retry_count": row[3],
-                "last_attempt": row[4]
-            })
-        
-        conn.close()
-        return results
+        with get_db_session() as db:
+            query = db.query(ChunkModel).filter(
+                ChunkModel.vector_status == "failed",
+                ChunkModel.vector_retry_count < max_retry,
+            )
+            if project_id:
+                query = query.filter(ChunkModel.project_id == project_id)
+            
+            chunks = query.order_by(
+                ChunkModel.last_vector_attempt.desc()
+            ).limit(limit).all()
+            
+            return [
+                {
+                    "id": c.id,
+                    "project_id": c.project_id,
+                    "error": c.vector_error,
+                    "retry_count": c.vector_retry_count,
+                    "last_attempt": c.last_vector_attempt.isoformat() if c.last_vector_attempt else None,
+                }
+                for c in chunks
+            ]
         
     except Exception as e:
         logger.error(f"获取失败 chunks 失败: {e}")
@@ -414,7 +384,6 @@ def get_failed_chunks(
 def reset_failed_chunks(
     project_id: Optional[str] = None,
     chunk_ids: Optional[List[str]] = None,
-    db_path: Optional[Path] = None
 ) -> int:
     """
     重置失败的 chunks 为 pending（待重试）
@@ -422,48 +391,32 @@ def reset_failed_chunks(
     Args:
         project_id: 项目 ID（可选，与 chunk_ids 二选一）
         chunk_ids: Chunk ID 列表（可选）
-        db_path: 数据库路径，默认从配置读取
         
     Returns:
         重置的数量
     """
-    if db_path is None:
-        db_path = settings.DB_PATH
+    from src.rag_api.models.database import Chunk as ChunkModel, get_db_session
+    from sqlalchemy import update as sql_update
+    
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        if chunk_ids:
-            placeholders = ",".join("?" * len(chunk_ids))
-            cursor.execute(f"""
-                UPDATE chunks 
-                SET vector_status = 'pending',
-                    vector_error = NULL
-                WHERE id IN ({placeholders})
-                AND vector_status = 'failed'
-            """, chunk_ids)
-        elif project_id:
-            cursor.execute("""
-                UPDATE chunks 
-                SET vector_status = 'pending',
-                    vector_error = NULL
-                WHERE project_id = ?
-                AND vector_status = 'failed'
-            """, (project_id,))
-        else:
-            cursor.execute("""
-                UPDATE chunks 
-                SET vector_status = 'pending',
-                    vector_error = NULL
-                WHERE vector_status = 'failed'
-            """)
-        
-        count = cursor.rowcount
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"重置 {count} 个失败 chunks 为 pending")
-        return count
+        with get_db_session() as db:
+            stmt = sql_update(ChunkModel).where(
+                ChunkModel.vector_status == "failed"
+            ).values(
+                vector_status="pending",
+                vector_error=None,
+            )
+            
+            if chunk_ids:
+                stmt = stmt.where(ChunkModel.id.in_(chunk_ids))
+            elif project_id:
+                stmt = stmt.where(ChunkModel.project_id == project_id)
+            
+            result = db.execute(stmt)
+            count = result.rowcount
+            
+            logger.info(f"重置 {count} 个失败 chunks 为 pending")
+            return count
         
     except Exception as e:
         logger.error(f"重置失败 chunks 失败: {e}")

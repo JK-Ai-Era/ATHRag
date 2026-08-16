@@ -45,12 +45,23 @@ async def lifespan(app: FastAPI):
     
     # 关闭 EmbeddingService 连接
     try:
-        import src.core.embedding as emb_module
-        if hasattr(emb_module, '_embedding_service') and emb_module._embedding_service:
-            await emb_module._embedding_service.close()
+        from src.core.embedding import get_embedding_service
+        embedding_svc = get_embedding_service()
+        if embedding_svc:
+            await embedding_svc.close()
             print("[Embedding] Service closed on shutdown")
     except Exception as e:
         print(f"[Embedding] Shutdown error: {e}")
+    
+    # 关闭 VectorStore 连接
+    try:
+        from src.core.vector_store import get_vector_store
+        vs = get_vector_store()
+        if vs:
+            await vs.close()
+            print("[VectorStore] Service closed on shutdown")
+    except Exception as e:
+        print(f"[VectorStore] Shutdown error: {e}")
 
 
 app = FastAPI(
@@ -128,8 +139,8 @@ async def health_check():
 @app.get("/health/detailed")
 async def detailed_health_check():
     """详细健康检查 - 检查所有依赖服务"""
-    from src.core.embedding import EmbeddingService
-    from src.core.vector_store import VectorStore
+    from src.core.embedding import get_embedding_service
+    from src.core.vector_store import get_vector_store
     from src.watcher.manager import get_watcher_manager
     
     result = {
@@ -151,7 +162,7 @@ async def detailed_health_check():
     
     # 检查 Qdrant
     try:
-        vector_store = VectorStore()
+        vector_store = get_vector_store()
         vector_store.client.get_collections()
         result["services"]["qdrant"] = "ok"
     except Exception as e:
@@ -159,7 +170,7 @@ async def detailed_health_check():
     
     # 检查 Ollama
     try:
-        embedding = EmbeddingService()
+        embedding = get_embedding_service()
         if await embedding.health_check():
             result["services"]["ollama"] = "ok"
         else:

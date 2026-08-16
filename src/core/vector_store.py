@@ -283,6 +283,11 @@ class VectorStore:
         
         return point_ids
     
+    async def close(self):
+        """关闭连接"""
+        if hasattr(self.client, 'close'):
+            self.client.close()
+
     def delete_vectors_batch(self, project_id: str, vector_ids: List[str]) -> int:
         """批量删除向量"""
         if not vector_ids:
@@ -301,3 +306,18 @@ class VectorStore:
         except Exception as e:
             logger.error(f"批量删除向量失败: {e}")
             return 0
+
+
+# ============================================================================
+# 全局单例管理
+# ============================================================================
+
+_vector_store: Optional[VectorStore] = None
+
+
+def get_vector_store() -> VectorStore:
+    """获取全局 VectorStore 单例"""
+    global _vector_store
+    if _vector_store is None:
+        _vector_store = VectorStore()
+    return _vector_store

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.rag_api.models.database import Project as ProjectModel
 from src.rag_api.models.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
-from src.core.vector_store import VectorStore
+from src.core.vector_store import get_vector_store
 
 
 def _notify_watcher_project_changed(project_name: str, watcher_enabled: bool) -> None:
@@ -34,7 +34,7 @@ class ProjectService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.vector_store = VectorStore()
+        self.vector_store = get_vector_store()
     
     def create_project(self, project: ProjectCreate) -> ProjectResponse:
         """创建项目"""

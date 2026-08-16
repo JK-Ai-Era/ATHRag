@@ -11,8 +11,8 @@ from src.rag_api.models.schemas import (
     SearchRequest, SearchResponse, SearchResult,
     QueryTransformMode, SearchMode,
 )
-from src.core.embedding import EmbeddingService
-from src.core.vector_store import VectorStore
+from src.core.embedding import get_embedding_service
+from src.core.vector_store import get_vector_store
 from src.core.bm25_index import bm25_manager
 from src.core.reranker import get_reranker
 from src.core.hierarchical_index import hierarchical_search, hierarchical_index
@@ -37,8 +37,8 @@ class SearchService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.embedding = EmbeddingService()
-        self.vector_store = VectorStore()
+        self.embedding = get_embedding_service()
+        self.vector_store = get_vector_store()
     
     async def search(self, request: SearchRequest) -> SearchResponse:
         """执行搜索"""

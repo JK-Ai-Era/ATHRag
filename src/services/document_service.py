@@ -26,8 +26,8 @@ from src.rag_api.models.database import Document as DocumentModel
 from src.rag_api.models.database import Project as ProjectModel
 from src.rag_api.models.database import get_db_session
 from src.core.chunker import TextChunker, ChunkWithMetadata
-from src.core.embedding import EmbeddingService
-from src.core.vector_store import VectorStore
+from src.core.embedding import get_embedding_service
+from src.core.vector_store import get_vector_store
 from src.core.bm25_index import bm25_manager
 from src.core.hierarchical_index import hierarchical_index
 
@@ -79,8 +79,8 @@ class DocumentService:
     
     def __init__(self):
         self.chunker = TextChunker()
-        self.embedding = EmbeddingService()
-        self.vector_store = VectorStore()
+        self.embedding = get_embedding_service()
+        self.vector_store = get_vector_store()
     
     def process_document(
         self,
@@ -437,12 +437,15 @@ class DocumentService:
                     return False
                 
                 project_id = doc.project_id
-                project_dir = settings.PROJECTS_DIR / project_id
+                saved_filename = doc.filename
+                saved_file_path = doc.file_path
+                saved_source_path = doc.source_path
                 
                 # 收集 chunks 和向量 ID
                 chunks = db.query(ChunkModel).filter(ChunkModel.document_id == document_id).all()
                 actual_chunk_count = len(chunks)
                 vector_ids = [c.vector_id for c in chunks if c.vector_id]
+                chunk_ids_for_bm25 = [c.id for c in chunks]
                 
                 # 删除 chunks
                 for chunk in chunks:
@@ -467,8 +470,8 @@ class DocumentService:
             # 更新 BM25
             try:
                 bm25_index = bm25_manager.get_index(project_id)
-                for chunk in chunks:
-                    bm25_index.remove_document(chunk.id)
+                for chunk_id in chunk_ids_for_bm25:
+                    bm25_index.remove_document(chunk_id)
                 bm25_index.save()
             except Exception as e:
                 logger.warning(f"BM25 索引更新失败: {e}")
@@ -481,11 +484,7 @@ class DocumentService:
             
             # 删除物理文件
             if delete_file:
-                file_path = Path(settings.PROJECTS_DIR / project_id / doc.filename) if 'doc' in dir() else None
-                # 重新查询避免 detached
-                with get_db_session() as db:
-                    doc = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
-                # 如果已删除则跳过
+                self._delete_physical_file(project_id, saved_filename, saved_file_path, saved_source_path)
             
             # 更新项目统计
             with get_db_session() as db:
@@ -501,6 +500,33 @@ class DocumentService:
         except Exception as e:
             logger.exception(f"删除文档失败: {e}")
             return False
+    
+    def _delete_physical_file(
+        self,
+        project_id: str,
+        filename: str,
+        file_path: Optional[str],
+        source_path: Optional[str],
+    ) -> None:
+        """删除物理文件，按优先级尝试多个路径"""
+        candidates = []
+        if filename:
+            candidates.append(settings.PROJECTS_DIR / project_id / filename)
+        if file_path:
+            candidates.append(Path(file_path))
+        if source_path:
+            candidates.append(Path(source_path))
+        
+        for path in candidates:
+            try:
+                if path.exists() and path.is_file():
+                    path.unlink()
+                    logger.info(f"已删除物理文件: {path}")
+                    return
+            except Exception as e:
+                logger.warning(f"删除文件失败 {path}: {e}")
+        
+        logger.debug(f"未找到可删除的物理文件: {filename}")
     
     # ========== 辅助方法 ==========
     

@@ -112,10 +112,10 @@ async def clean_orphan_projects(
     Args:
         request: dry_run=True 只显示不删除，dry_run=False 实际删除
     """
-    from src.core.vector_store import VectorStore
+    from src.core.vector_store import get_vector_store
     
     projects_root = Path("~/Projects").expanduser()
-    vector_store = VectorStore()
+    vector_store = get_vector_store()
     
     try:
         # 获取所有项目
