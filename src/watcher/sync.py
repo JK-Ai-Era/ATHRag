@@ -226,18 +226,23 @@ class ConsistencyChecker:
         return self.stats
     
     def _check_orphaned_files(self):
-        """检查并清理孤儿文件（数据库有记录但源文件已删除）"""
-        # 获取数据库中所有文档
+        """检查并清理孤儿文件（数据库有记录但文件已删除）"""
         docs = self.db.query(DocumentModel).filter(
             DocumentModel.project_id == self.project_id
         ).all()
         
         orphaned_count = 0
         for doc in docs:
-            # 检查原文件是否存在
-            source_path = self.watch_root / doc.filename
-            if not source_path.exists():
-                # 这是孤儿文件，需要清理
+            # 优先检查 RAG 项目目录里的副本（ParseWorker 复制过去的）
+            rag_file = Path(doc.file_path) if doc.file_path else None
+            # 再检查源目录里的原始文件
+            source_file = self.watch_root / doc.filename
+            
+            # 两个都不存在才算孤儿
+            rag_exists = rag_file and rag_file.exists()
+            source_exists = source_file.exists()
+            
+            if not rag_exists and not source_exists:
                 logger.warning(f"发现孤儿文件: {doc.filename}")
                 orphaned_count += 1
                 self._cleanup_orphaned_document(doc)

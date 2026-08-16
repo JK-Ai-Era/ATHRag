@@ -37,4 +37,4 @@ echo "   地址: http://localhost:6333"
 echo ""
 
 cd "$QDRANT_DIR"
-exec "$QDRANT_BIN" --storage-path "$QDRANT_DIR/storage"
+exec "$QDRANT_BIN"
