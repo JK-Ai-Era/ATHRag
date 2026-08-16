@@ -36,7 +36,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 # 任务处理超时（秒）：超过此时间认为任务卡死
-TASK_TIMEOUT_SECONDS = 600  # 10 分钟
+TASK_TIMEOUT_SECONDS = get_settings().WORKER_TASK_TIMEOUT
 # 健康检查间隔（秒）
 HEALTH_CHECK_INTERVAL = 30
 
@@ -56,12 +56,12 @@ class ParseWorker:
     def __init__(
         self,
         worker_id: Optional[str] = None,
-        poll_interval: float = 2.0,
-        batch_size: int = 3,
+        poll_interval: Optional[float] = None,
+        batch_size: Optional[int] = None,
     ):
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
-        self.poll_interval = poll_interval
-        self.batch_size = batch_size
+        self.poll_interval = poll_interval or settings.WORKER_POLL_INTERVAL
+        self.batch_size = batch_size or settings.WORKER_BATCH_SIZE
         self.dispatcher = ParseDispatcher()
         self._running = False
         self._thread: Optional[threading.Thread] = None

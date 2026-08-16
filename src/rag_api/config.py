@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     CONTEXT_COMPRESS_USE_LLM: bool = True  # 是否使用 LLM 压缩（false 则用规则压缩）
     CONTEXT_COMPRESS_MAX_CHUNKS: int = 5  # 最多压缩的 chunk 数量
     
+    # Worker 配置
+    WORKER_BATCH_SIZE: int = 3          # 每批领取任务数
+    WORKER_POLL_INTERVAL: float = 2.0   # 轮询间隔（秒）
+    WORKER_TASK_TIMEOUT: int = 600      # 任务超时（秒）
+
+    # Embedding 并发配置
+    EMBED_CONCURRENCY: int = 3          # embedding 并发数
+
     # Watcher 配置
     WATCHER_ROOT: Path = Path.home() / "Projects"  # 监听根目录
 

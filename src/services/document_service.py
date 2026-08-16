@@ -308,7 +308,7 @@ class DocumentService:
                 if loop.is_running():
                     # 已有事件循环，用 run_in_executor 调同步回退
                     import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=settings.EMBED_CONCURRENCY) as executor:
                         results = list(executor.map(self.embedding.embed_text_sync, texts))
                 else:
                     results = loop.run_until_complete(self.embedding.embed_batch(texts))
@@ -317,7 +317,7 @@ class DocumentService:
             except RuntimeError:
                 # 没有事件循环，用线程池并发
                 import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=settings.EMBED_CONCURRENCY) as executor:
                     results = list(executor.map(self.embedding.embed_text_sync, texts))
             
             # 批量写入 Qdrant
