@@ -57,7 +57,7 @@ class ParseWorker:
         self,
         worker_id: Optional[str] = None,
         poll_interval: float = 2.0,
-        batch_size: int = 5,
+        batch_size: int = 3,
     ):
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.poll_interval = poll_interval
