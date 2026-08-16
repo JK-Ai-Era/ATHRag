@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # 分块配置
     CHUNK_SIZE: int = 1000           # 目标分块大小
     CHUNK_OVERLAP: int = 100         # 重叠大小
-    MAX_CHUNK_SIZE: int = 4000       # 硬性上限（防止 Ollama 超限，古籍内容 token 消耗高）
+    MAX_CHUNK_SIZE: int = 2000       # 硬性上限（中文 1字≈2-3token，bge-m3 限制 8192 tokens）
     MIN_CHUNK_SIZE: int = 300        # 最小分块大小（防止过碎）
     CHUNK_SEPARATORS: List[str] = ["\n\n", "\n", "。", "；", " ", ""]
     

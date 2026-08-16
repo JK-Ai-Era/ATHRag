@@ -71,7 +71,7 @@ class EmbeddingService:
             raise ValueError("文本为空，无法向量化")
         
         # 截断过长文本
-        max_chars = min(4000, settings.MAX_CHUNK_SIZE)
+        max_chars = settings.MAX_CHUNK_SIZE
         if len(text) > max_chars:
             logger.warning(f"文本过长 ({len(text)} 字符)，截断到 {max_chars}")
             text = text[:max_chars]
@@ -141,9 +141,7 @@ class EmbeddingService:
             raise ValueError("文本为空，无法向量化")
         
         # 硬性上限保护（防止 Ollama 500）
-        # 古籍内容 token 消耗高：约 1 汉字 = 2-3 tokens
-        # bge-m3 支持 8192 tokens，保守上限 4000 字符
-        max_chars = min(4000, settings.MAX_CHUNK_SIZE)
+        max_chars = settings.MAX_CHUNK_SIZE
         if len(text) > max_chars:
             logger.warning(f"文本过长 ({len(text)} 字符)，截断到 {max_chars}")
             text = text[:max_chars]
