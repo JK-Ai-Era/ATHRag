@@ -55,6 +55,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "jieba>=0.42.1",  # 中文分词
     "scikit-learn>=1.5.0",
+    "sentence-transformers>=3.0.0",  # Reranker (CrossEncoder)
     
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
@@ -73,6 +74,10 @@ dependencies = [
     "watchdog>=6.0.0",
     "pathspec>=0.12.0",  # .gitignore 解析
     "loguru>=0.7.0",
+    "PyYAML>=6.0.0",  # parsers.yaml 解析
+    "openpyxl>=3.1.0",  # .xlsx 解析
+    "Pillow>=10.0.0",  # 图片处理
+    "requests>=2.31.0",  # HTTP 请求
 ]
 
 [project.optional-dependencies]
