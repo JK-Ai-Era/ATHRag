@@ -249,17 +249,28 @@ class ParseWorker:
         finally:
             db.close()
 
-        # 逐个处理
+        # 并行处理多个任务（用线程池，让 Ollama 持续满载）
+        import concurrent.futures
         processed = 0
-        for task_id in task_ids:
-            if not self._running:
-                break
+
+        def _run_task(tid: str) -> bool:
             try:
-                self._process_single_task(task_id)
-                processed += 1
+                self._process_single_task(tid)
+                return True
             except Exception as e:
-                logger.error(f"[{self.worker_id}] 任务处理异常 {task_id}: {e}")
-                self._mark_task_failed(task_id, str(e))
+                logger.error(f"[{self.worker_id}] 任务处理异常 {tid}: {e}")
+                self._mark_task_failed(tid, str(e))
+                return False
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(task_ids)
+        ) as executor:
+            futures = {executor.submit(_run_task, tid): tid for tid in task_ids}
+            for future in concurrent.futures.as_completed(futures):
+                if not self._running:
+                    break
+                if future.result():
+                    processed += 1
 
         return processed
 
