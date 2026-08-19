@@ -31,6 +31,15 @@ if [ ! -f "$QDRANT_BIN" ]; then
     echo "✓ Qdrant 下载完成"
 fi
 
+# 检查端口是否已被占用（避免与 launchd 服务冲突）
+if lsof -i :6333 -sTCP:LISTEN > /dev/null 2>&1; then
+    echo "⚠️  端口 6333 已被占用，Qdrant 已在运行："
+    lsof -i :6333 -sTCP:LISTEN | head -3
+    echo ""
+    echo "如需重启，请先运行: launchctl stop com.athrag.qdrant"
+    exit 1
+fi
+
 # 启动 Qdrant
 echo "🚀 启动 Qdrant..."
 echo "   地址: http://localhost:6333"

@@ -15,8 +15,12 @@ from src.rag_api.models.schemas import (
     ProjectUpdate,
 )
 from src.services.project_service import ProjectService
+from src.services.document_service import DocumentService
 
 router = APIRouter()
+
+# revectorize 防重复调用锁（模块级）
+_revectorize_locks: dict[str, bool] = {}
 
 
 class CleanOrphanRequest(BaseModel):
@@ -180,3 +184,80 @@ async def clean_orphan_projects(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清理失败: {str(e)}")
+
+
+@router.post("/{project_id}/revectorize", response_model=APIResponse)
+async def revectorize_pending_chunks(
+    project_id: str,
+    batch_size: int = 200,
+    max_chunks: int = 10000,
+    db: Session = Depends(get_db),
+):
+    """
+    批量处理 pending 状态的 chunks 向量化
+    
+    用于恢复因 API 崩溃等原因卡在 pending 状态的 chunks。
+    在后台线程中执行，立即返回。
+    
+    Args:
+        project_id: 项目 ID
+        batch_size: 每批处理的 chunk 数（默认 200）
+        max_chunks: 最多处理的 chunk 总数（默认 10000）
+    """
+    import threading
+    
+    # 防重复调用：如果该项目已有 revectorize 在运行，直接返回
+    if _revectorize_locks.get(project_id):
+        return APIResponse(
+            success=False,
+            message=f"项目 {project_id} 已有 revectorize 任务在运行中"
+        )
+    
+    # 检查项目是否存在
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    # 统计 pending 数量
+    pending_count = db.query(Chunk).filter(
+        Chunk.project_id == project_id,
+        Chunk.vector_status == "pending",
+    ).count()
+    
+    if pending_count == 0:
+        return APIResponse(
+            success=True,
+            data={"pending_count": 0},
+            message="没有待处理的 chunks"
+        )
+    
+    # 设置运行标志
+    _revectorize_locks[project_id] = True
+    
+    # 后台执行
+    def _run():
+        try:
+            svc = DocumentService()
+            result = svc.batch_vectorize_pending(
+                project_id=project_id,
+                batch_size=batch_size,
+                max_chunks=max_chunks,
+            )
+            logger.info(
+                f"revectorize 完成: 项目 {project_id}, "
+                f"处理 {result['processed']}, 成功 {result['success']}, "
+                f"失败 {result['failed']}, 剩余 {result['remaining']}"
+            )
+        except Exception as e:
+            logger.error(f"revectorize 失败: {project_id}: {e}")
+        finally:
+            _revectorize_locks[project_id] = False
+    
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    
+    return APIResponse(
+        success=True,
+        data={"pending_count": pending_count, "batch_size": batch_size, "max_chunks": max_chunks},
+        message=f"已启动后台向量化任务，待处理 chunks: {pending_count}"
+    )

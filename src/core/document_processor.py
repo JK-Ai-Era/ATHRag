@@ -318,7 +318,13 @@ class DocumentProcessor:
     # ========== Excel 解析（原生回退） ==========
 
     def _extract_xlsx(self, file_path: Path) -> str:
-        """提取 Excel 文本（原生解析器）"""
+        """提取 Excel 文本（原生解析器）
+
+        为避免大型表格产生过多 chunks，将每 N 行合并为一个段落，
+        而不是每行一个独立行。chunker 可以正常按字符数分块。
+        """
+        ROW_BATCH_SIZE = 100  # 每 100 行合并为一个段落
+
         try:
             import openpyxl
 
@@ -330,12 +336,22 @@ class DocumentProcessor:
                 text_parts.append(f"# 工作表: {sheet_name}")
                 text_parts.append("")
 
+                batch_lines = []
                 for row in sheet.iter_rows(values_only=True):
                     row_text = " | ".join(
                         str(cell) for cell in row if cell is not None
                     )
                     if row_text.strip():
-                        text_parts.append(row_text)
+                        batch_lines.append(row_text)
+
+                    # 每 ROW_BATCH_SIZE 行合并为一个段落
+                    if len(batch_lines) >= ROW_BATCH_SIZE:
+                        text_parts.append("\n".join(batch_lines))
+                        batch_lines = []
+
+                # 剩余行
+                if batch_lines:
+                    text_parts.append("\n".join(batch_lines))
 
                 text_parts.append("")
 

@@ -481,11 +481,64 @@ class FileSync:
         return "other"
     
     def get_document_by_filename(self, filename: str) -> Optional[DocumentModel]:
-        """根据文件名获取文档"""
-        return self.db.query(DocumentModel).filter(
+        """根据文件名获取文档
+        
+        如果存在多个同名文档（历史 bug 导致的重复），
+        返回最新的一个，并清理其余重复记录。
+        """
+        docs = self.db.query(DocumentModel).filter(
             DocumentModel.project_id == self.project_id,
             DocumentModel.filename == filename
-        ).first()
+        ).order_by(DocumentModel.created_at.desc()).all()
+        
+        if not docs:
+            return None
+        
+        if len(docs) > 1:
+            self._cleanup_duplicate_documents(docs)
+        
+        return docs[0]
+    
+    def _cleanup_duplicate_documents(self, docs: list) -> None:
+        """清理重复文档：保留最新的（docs[0]），删除其余的。
+        
+        删除时同步更新项目的 document_count 和 chunk_count 统计。
+        """
+        logger.warning(
+            f"发现 {len(docs)} 个同名文档 '{docs[0].filename}'，"
+            f"保留最新 (ID: {docs[0].id})，清理 {len(docs)-1} 个旧记录"
+        )
+        total_deleted_chunks = 0
+        for dup in docs[1:]:
+            try:
+                # 删除旧文档的 chunks 和向量
+                old_chunks = self.db.query(ChunkModel).filter(
+                    ChunkModel.document_id == dup.id
+                ).all()
+                for chunk in old_chunks:
+                    if chunk.vector_id:
+                        try:
+                            self.vector_store.delete_vector(self.project_id, chunk.vector_id)
+                        except Exception:
+                            pass
+                    self.db.delete(chunk)
+                total_deleted_chunks += len(old_chunks)
+                self.db.delete(dup)
+            except Exception as e:
+                logger.error(f"清理重复文档失败 {dup.id}: {e}")
+        try:
+            self.db.commit()
+            # 更新项目统计
+            if total_deleted_chunks > 0:
+                project = self.db.query(ProjectModel).filter(
+                    ProjectModel.id == self.project_id
+                ).first()
+                if project:
+                    project.document_count = max(0, project.document_count - (len(docs) - 1))
+                    project.chunk_count = max(0, project.chunk_count - total_deleted_chunks)
+                    self.db.commit()
+        except Exception:
+            self.db.rollback()
     
     def sync_file(self, source_path: Path, relative_path: str) -> Dict[str, Any]:
         """
@@ -562,20 +615,40 @@ class FileSync:
             return {"status": "error", "error": str(e)}
     
     def _update_document(self, doc: DocumentModel, source_path: Path) -> Dict[str, Any]:
-        """更新现有文档（蓝绿模式：先处理成功再删旧数据）"""
+        """更新现有文档（原地更新模式，避免创建重复记录）
+        
+        直接复用现有文档 ID 调用 process_document，
+        _save_doc_and_chunks 会在同一事务内原子地替换旧 chunks。
+        """
         try:
-            # 复制新文件到临时位置
+            # 复制新文件到项目目录
             project_dir = settings.PROJECTS_DIR / self.project_id
             dest_path = project_dir / doc.filename
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, dest_path)
             
-            # 先用新文件处理（创建新文档记录）
+            # 收集旧 chunk 的 vector_id，供后续清理。
+            # 注意：这些 chunk 来自当前 self.db session，但 process_document 内部
+            # 使用独立的 get_db_session()。如果 process_document 失败，
+            # _save_doc_and_chunks 会在独立 session 中删除旧 chunks 并回滚，
+            # 而 old_vector_ids 此处已收集但不会被使用（下面的代码不会执行到）。
+            # 旧向量的最终清理由 ConsistencyChecker 的孤儿向量检查兜底。
+            old_vector_ids = []
+            old_chunks = self.db.query(ChunkModel).filter(
+                ChunkModel.document_id == doc.id
+            ).all()
+            for chunk in old_chunks:
+                if chunk.vector_id:
+                    old_vector_ids.append(chunk.vector_id)
+            
+            # 原地更新：传入现有 document_id，_save_doc_and_chunks 会在
+            # 同一事务内删除旧 chunks 并创建新 chunks
             doc_type = self.get_doc_type(source_path)
             result = self.doc_service.process_document(
                 file_path=dest_path,
                 doc_type=doc_type,
                 project_id=self.project_id,
+                document_id=doc.id,  # 复用现有文档，避免创建新记录
                 filename=doc.filename,
                 source_path=str(source_path),
                 metadata={"source_path": str(source_path)}
@@ -585,25 +658,14 @@ class FileSync:
                 logger.error(f"Error updating document {doc.filename}: {result.error_message}")
                 return {"status": "error", "error": result.error_message}
             
-            # 新文档处理成功，再删除旧文档数据
-            old_chunk_count = doc.chunk_count
-            old_chunks = self.db.query(ChunkModel).filter(
-                ChunkModel.document_id == doc.id
-            ).all()
+            # 异步清理旧向量（不阻塞主流程，孤儿向量由 ConsistencyChecker 兜底）
+            for vid in old_vector_ids:
+                try:
+                    self.vector_store.delete_vector(self.project_id, vid)
+                except Exception as e:
+                    logger.debug(f"清理旧向量失败（已忽略）: {vid}: {e}")
             
-            for chunk in old_chunks:
-                if chunk.vector_id:
-                    try:
-                        self.vector_store.delete_vector(self.project_id, chunk.vector_id)
-                    except Exception as e:
-                        logger.warning(f"删除旧向量失败 {chunk.vector_id}: {e}")
-                self.db.delete(chunk)
-            
-            # 删除旧文档记录
-            self.db.delete(doc)
-            self.db.commit()
-            
-            logger.info(f"Updated document '{doc.filename}' (new ID: {result.document_id})")
+            logger.info(f"Updated document '{doc.filename}' (ID: {result.document_id})")
             return {"status": "updated", "doc_id": result.document_id}
             
         except Exception as e:

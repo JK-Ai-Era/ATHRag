@@ -256,6 +256,7 @@ class DocumentService:
                     project_id=project_id,
                     content=chunk_obj.content,
                     chunk_index=idx,
+                    vector_status="pending",
                     metadata_json=json.dumps(chunk_metadata),
                 )
                 db.add(chunk)
@@ -328,6 +329,8 @@ class DocumentService:
             for (idx, chunk), emb in zip(pending_chunks, results):
                 if emb is None:
                     failed_count += 1
+                    chunk.vector_status = "failed"
+                    chunk.vector_error = "embedding 返回空"
                     errors.append(f"chunk {idx}: embedding 返回空")
                     continue
                 
@@ -357,12 +360,19 @@ class DocumentService:
                     for (idx, chunk), vid in zip(chunks_to_update, vector_ids):
                         if vid:
                             chunk.vector_id = vid
+                            chunk.vector_status = "success"
+                            chunk.vector_error = None
                             success_count += 1
                         else:
                             failed_count += 1
+                            chunk.vector_status = "failed"
+                            chunk.vector_error = "向量写入返回空 ID"
                             errors.append(f"chunk {idx}: 向量写入返回空 ID")
                 except Exception as e:
                     failed_count += len(vectors_to_write)
+                    for (idx, chunk) in chunks_to_update:
+                        chunk.vector_status = "failed"
+                        chunk.vector_error = str(e)[:200]
                     errors.append(f"批量向量写入失败: {str(e)[:80]}")
             
             # 批量 commit 所有 vector_id 更新
@@ -460,6 +470,171 @@ class DocumentService:
                 )
             except Exception as e:
                 logger.warning(f"[{doc_id}] 层次化索引失败: {e}")
+    
+    # ========== 批量处理 pending chunks ==========
+    
+    def batch_vectorize_pending(
+        self,
+        project_id: str,
+        batch_size: int = 200,
+        max_chunks: int = 10000,
+    ) -> Dict[str, Any]:
+        """批量向量化所有 pending 状态的 chunks。
+        
+        用于恢复因崩溃等原因卡在 pending 状态的 chunks。
+        
+        Args:
+            project_id: 项目 ID
+            batch_size: 每批处理的 chunk 数量
+            max_chunks: 最多处理的 chunk 总数
+            
+        Returns:
+            {"processed": int, "success": int, "failed": int, "remaining": int}
+        """
+        total_success = 0
+        total_failed = 0
+        total_processed = 0
+        
+        while total_processed < max_chunks:
+            with get_db_session() as db:
+                # 获取一批 pending chunks
+                pending_rows = db.query(ChunkModel).filter(
+                    ChunkModel.project_id == project_id,
+                    ChunkModel.vector_status == "pending",
+                ).order_by(ChunkModel.created_at).limit(batch_size).all()
+                
+                if not pending_rows:
+                    break
+                
+                # 获取关联的文档信息
+                doc_ids = set(c.document_id for c in pending_rows)
+                doc_info = {}
+                for doc_id in doc_ids:
+                    doc = db.query(DocumentModel).filter(DocumentModel.id == doc_id).first()
+                    if doc:
+                        doc_info[doc_id] = {
+                            "filename": doc.filename,
+                            "source_path": doc.source_path,
+                        }
+                
+                # 在 session 内提取为纯 Python 对象，避免 detached ORM 访问
+                pending = []
+                for c in pending_rows:
+                    pending.append({
+                        "id": c.id,
+                        "document_id": c.document_id,
+                        "content": c.content,
+                        "metadata_json": c.metadata_json,
+                    })
+                
+                texts = [c["content"] for c in pending]
+            
+            # 批量 embedding
+            import asyncio
+            import concurrent.futures
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=settings.EMBED_CONCURRENCY) as executor:
+                        embeddings = list(executor.map(self.embedding.embed_text_sync, texts))
+                else:
+                    embeddings = loop.run_until_complete(self.embedding.embed_batch(texts))
+                    if isinstance(embeddings, tuple):
+                        embeddings = list(embeddings[0])
+            except RuntimeError:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=settings.EMBED_CONCURRENCY) as executor:
+                    embeddings = list(executor.map(self.embedding.embed_text_sync, texts))
+            
+            # 收集需要写入的向量（分离 embedding 失败的 chunk）
+            vectors_to_write = []
+            payloads_to_write = []
+            chunks_to_update = []  # 只存成功 embedding 的 chunk
+            failed_chunk_ids = []
+            
+            for chunk, emb in zip(pending, embeddings):
+                if emb is None:
+                    total_failed += 1
+                    failed_chunk_ids.append(chunk["id"])
+                    continue
+                
+                doc = doc_info.get(chunk["document_id"])
+                metadata = json.loads(chunk["metadata_json"]) if chunk["metadata_json"] else {}
+                payload = {
+                    "chunk_id": chunk["id"],
+                    "document_id": chunk["document_id"],
+                    "content": chunk["content"],
+                    "filename": doc["filename"] if doc else "",
+                    "source_path": doc["source_path"] if doc else None,
+                    "start_line": metadata.get("start_line"),
+                    "end_line": metadata.get("end_line"),
+                    "symbols": metadata.get("symbols", []),
+                }
+                vectors_to_write.append(emb)
+                payloads_to_write.append(payload)
+                chunks_to_update.append(chunk)
+            
+            # 立即标记 embedding 失败的 chunk，避免无限重试
+            if failed_chunk_ids:
+                with get_db_session() as db:
+                    for cid in failed_chunk_ids:
+                        db_chunk = db.query(ChunkModel).filter(ChunkModel.id == cid).first()
+                        if db_chunk:
+                            db_chunk.vector_status = "failed"
+                            db_chunk.vector_error = "embedding 返回空"
+                    db.commit()
+            
+            # 批量写入 Qdrant
+            if vectors_to_write:
+                try:
+                    vector_ids = self.vector_store.add_vectors_batch(
+                        project_id=project_id,
+                        vectors=vectors_to_write,
+                        payloads=payloads_to_write,
+                    )
+                    with get_db_session() as db:
+                        for chunk, vid in zip(chunks_to_update, vector_ids):
+                            db_chunk = db.query(ChunkModel).filter(ChunkModel.id == chunk["id"]).first()
+                            if db_chunk:
+                                if vid:
+                                    db_chunk.vector_id = vid
+                                    db_chunk.vector_status = "success"
+                                    db_chunk.vector_error = None
+                                    total_success += 1
+                                else:
+                                    db_chunk.vector_status = "failed"
+                                    db_chunk.vector_error = "向量写入返回空 ID"
+                                    total_failed += 1
+                        db.commit()
+                except Exception as e:
+                    logger.error(f"批量向量写入失败: {e}")
+                    with get_db_session() as db:
+                        for chunk in chunks_to_update:
+                            db_chunk = db.query(ChunkModel).filter(ChunkModel.id == chunk["id"]).first()
+                            if db_chunk:
+                                db_chunk.vector_status = "failed"
+                                db_chunk.vector_error = str(e)[:200]
+                        db.commit()
+                    total_failed += len(chunks_to_update)
+            
+            total_processed += len(pending)
+            logger.info(
+                f"batch_vectorize: 已处理 {total_processed}, "
+                f"成功 {total_success}, 失败 {total_failed}"
+            )
+        
+        # 统计剩余 pending 数量
+        with get_db_session() as db:
+            remaining = db.query(ChunkModel).filter(
+                ChunkModel.project_id == project_id,
+                ChunkModel.vector_status == "pending",
+            ).count()
+        
+        return {
+            "processed": total_processed,
+            "success": total_success,
+            "failed": total_failed,
+            "remaining": remaining,
+        }
     
     # ========== 删除文档 ==========
     
