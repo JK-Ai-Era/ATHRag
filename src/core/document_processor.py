@@ -11,6 +11,7 @@
 """
 
 import logging
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 
@@ -104,6 +105,7 @@ class DocumentProcessor:
     ) -> Dict[str, Any]:
         """提取结构化文档（返回完整结构）
 
+        通过子进程隔离调用 Unstructured，防止恶意文档崩溃主服务。
         仅支持 Office 文档类型 (docx/xlsx/pptx)。
 
         Args:
@@ -124,35 +126,14 @@ class DocumentProcessor:
         if doc_type not in ["docx", "xlsx", "pptx"]:
             raise ValueError(f"不支持的文档类型: {doc_type}，仅支持 docx/xlsx/pptx")
 
-        from src.core.unstructured_parser import UnstructuredOfficeParser
-
-        parser = UnstructuredOfficeParser()
-
-        if doc_type == "docx":
-            result = parser.parse_docx(file_path)
-        elif doc_type == "xlsx":
-            result = parser.parse_xlsx(file_path)
-        elif doc_type == "pptx":
-            result = parser.parse_pptx(file_path)
-        else:
-            raise ValueError(f"不支持的类型: {doc_type}")
-
-        return {
-            "text": result.text,
-            "markdown": result.markdown,
-            "metadata": result.metadata,
-            "tables": [self._table_to_dict(t) for t in result.tables],
-            "sections": [self._section_to_dict(s) for s in result.sections],
-            "images": result.images,
-            "page_count": result.page_count,
-        }
+        return self._run_unstructured_subprocess(file_path, mode="structured")
 
     def _extract_with_unstructured(
         self,
         file_path: Path,
         doc_type: str
     ) -> str:
-        """使用 Unstructured 提取文本
+        """使用 Unstructured 提取文本（子进程隔离）
 
         Args:
             file_path: 文件路径
@@ -161,26 +142,80 @@ class DocumentProcessor:
         Returns:
             str: Markdown 格式的文本
         """
-        from src.core.unstructured_parser import UnstructuredOfficeParser
+        result = self._run_unstructured_subprocess(file_path, mode="text")
+        logger.info(f"Unstructured 子进程解析完成: {file_path.name}")
+        return result.get("markdown", result.get("text", ""))
 
-        parser = UnstructuredOfficeParser()
+    def _run_unstructured_subprocess(
+        self,
+        file_path: Path,
+        mode: str = "text"
+    ) -> Dict[str, Any]:
+        """在子进程中运行 Unstructured 解析器
 
-        if doc_type == "docx":
-            result = parser.parse_docx(file_path)
-        elif doc_type == "xlsx":
-            result = parser.parse_xlsx(file_path)
-        elif doc_type == "pptx":
-            result = parser.parse_pptx(file_path)
-        else:
-            raise ValueError(f"不支持的类型: {doc_type}")
+        进程隔离的好处：
+        - 恶意文档导致的崩溃不会影响主服务
+        - 内存泄漏不会传播到主进程
+        - 超时自动终止，防止卡死
 
-        logger.info(
-            f"Unstructured 解析完成: {file_path.name} - "
-            f"{len(result.tables)} 表格, {len(result.sections)} 章节"
-        )
+        Args:
+            file_path: 文件路径
+            mode: "text" 返回 markdown/text，"structured" 返回完整结构
 
-        # 返回 Markdown 格式，保留结构
-        return result.markdown
+        Returns:
+            Dict: 解析结果
+
+        Raises:
+            ValueError: 解析失败或超时
+        """
+        import subprocess
+        import json as json_mod
+
+        script_path = Path(__file__).parent.parent.parent / "scripts" / "unstructured_processor.py"
+
+        if not script_path.exists():
+            raise ValueError(f"Unstructured 处理脚本不存在: {script_path}")
+
+        try:
+            input_data = json_mod.dumps({
+                "file_path": str(file_path.resolve()),
+                "mode": mode,
+            })
+
+            result = subprocess.run(
+                [sys.executable, str(script_path)],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                # 尝试从 stdout 解析错误信息
+                try:
+                    err_data = json_mod.loads(result.stdout.strip())
+                    error_msg = err_data.get("error", result.stderr)
+                except (json_mod.JSONDecodeError, ValueError):
+                    error_msg = result.stderr or "未知错误"
+                raise ValueError(f"Unstructured 子进程解析失败: {error_msg}")
+
+            output = result.stdout.strip()
+            if not output:
+                raise ValueError("Unstructured 子进程无输出")
+
+            data = json_mod.loads(output)
+
+            if not data.get("success"):
+                raise ValueError(f"Unstructured 解析失败: {data.get('error', '未知错误')}")
+
+            return data
+
+        except subprocess.TimeoutExpired:
+            raise ValueError(f"Unstructured 子进程超时（120s）: {file_path.name}")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Unstructured 子进程调用失败: {e}")
 
     def _extract_with_fallback(self, file_path: Path, doc_type: str) -> str:
         """使用原生解析器提取（作为回退）"""
