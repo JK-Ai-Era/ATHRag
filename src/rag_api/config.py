@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     QDRANT_GRPC_PORT: int = 6334
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION_PREFIX: str = "project_"
-    QDRANT_TIMEOUT: int = 30
+    QDRANT_TIMEOUT: int = 120
     
     # 数据目录
     DATA_DIR: Path = Path("./data")

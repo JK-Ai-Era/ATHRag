@@ -127,14 +127,19 @@ class VectorStore:
         project_id: str,
         vectors: List[List[float]],
         payloads: List[Dict[str, Any]],
+        batch_size: int = 500,
     ) -> List[Optional[str]]:
-        """批量添加向量
+        """批量添加向量（内部分批写入，防止大文档超时）
+        
+        将大批量拆分为多个小批次逐批写入 Qdrant，每批最多 batch_size 条。
+        单批失败会重试一次，仍失败则抛出异常。
         
         Returns:
             与输入等长的 ID 列表，失败位置返回 None
             
         Raises:
-            ValueError: 批量添加失败时抛出异常（不返回空列表）
+            ValueError: 参数错误
+            RuntimeError: 批量添加最终失败
         """
         if not vectors or not payloads:
             return []
@@ -147,28 +152,44 @@ class VectorStore:
         # 确保 collection 存在
         self.create_collection(project_id)
         
-        # 尝试批量添加
-        try:
-            point_ids = [str(uuid.uuid4()) for _ in vectors]
+        all_point_ids: List[Optional[str]] = [None] * len(vectors)
+        total = len(vectors)
+        
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            batch_vectors = vectors[start:end]
+            batch_payloads = payloads[start:end]
+            
+            point_ids = [str(uuid.uuid4()) for _ in batch_vectors]
             points = [
                 models.PointStruct(
-                    id=point_id,
+                    id=pid,
                     vector=vec,
-                    payload=payload,
+                    payload=pl,
                 )
-                for point_id, vec, payload in zip(point_ids, vectors, payloads)
+                for pid, vec, pl in zip(point_ids, batch_vectors, batch_payloads)
             ]
-
-            self.client.upsert(
-                collection_name=collection_name,
-                points=points,
-            )
-            return point_ids
-        except Exception as e:
-            logger.error(f"批量添加向量失败: {e}")
-            # ⚠️ 不返回空列表！抛出异常让调用方处理
-            # 调用方（document_service）会保留 chunks，可后续重新处理
-            raise RuntimeError(f"批量添加向量失败: {e}")
+            
+            # 写入失败重试一次
+            for attempt in range(2):
+                try:
+                    self.client.upsert(
+                        collection_name=collection_name,
+                        points=points,
+                    )
+                    for i, pid in enumerate(point_ids):
+                        all_point_ids[start + i] = pid
+                    break
+                except Exception as e:
+                    if attempt == 0:
+                        logger.warning(f"批次 {start}-{end} 首次写入失败，重试: {e}")
+                        import time
+                        time.sleep(2)
+                    else:
+                        logger.error(f"批量添加向量失败 (批次 {start}-{end}/{total}): {e}")
+                        raise RuntimeError(f"批量添加向量失败 (批次 {start}-{end}/{total}): {e}")
+        
+        return all_point_ids
 
     def search(
         self,
