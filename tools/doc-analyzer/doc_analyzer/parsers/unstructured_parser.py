@@ -9,8 +9,10 @@ from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass, field
 
 from unstructured.partition.docx import partition_docx
+from unstructured.partition.doc import partition_doc
 from unstructured.partition.xlsx import partition_xlsx
 from unstructured.partition.pptx import partition_pptx
+from unstructured.partition.ppt import partition_ppt
 from unstructured.documents.elements import (
     Table, Text, Title, ListItem,
     NarrativeText, Header, Footer, PageBreak,
@@ -129,6 +131,25 @@ class UnstructuredOfficeParser:
             include_metadata=True,
         )
 
+        return self._process_elements(elements, file_path)
+
+    def parse_doc(self, file_path: Union[str, Path]) -> ParsedDocument:
+        """解析旧版 Word 文档 (.doc)"""
+        file_path = Path(file_path)
+        elements = partition_doc(
+            filename=str(file_path),
+            include_page_breaks=True,
+            include_metadata=True,
+        )
+        return self._process_elements(elements, file_path)
+
+    def parse_ppt(self, file_path: Union[str, Path]) -> ParsedDocument:
+        """解析旧版 PowerPoint 文档 (.ppt)"""
+        file_path = Path(file_path)
+        elements = partition_ppt(
+            filename=str(file_path),
+            include_metadata=True,
+        )
         return self._process_elements(elements, file_path)
 
     def _process_elements(

@@ -137,20 +137,36 @@ class ParseDispatcher:
         except Exception as e:
             raise ValueError(f"{cli_name} 执行失败: {e}")
 
+        # 尝试从 stdout 解析 JSON（CLI 可能通过 JSON 返回详细错误）
+        parsed_output = None
+        if result.stdout.strip():
+            try:
+                parsed_output = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                pass
+
         if result.returncode != 0:
+            # 优先从 JSON stdout 提取错误信息，stderr 可能为空
+            detail = result.stderr[:200].strip()
+            if not detail and parsed_output and isinstance(parsed_output.get("error"), str):
+                detail = parsed_output["error"][:200]
+            if not detail:
+                detail = f"stdout[:200]: {result.stdout[:200]}"
             raise ValueError(
-                f"{cli_name} 返回错误 (code={result.returncode}): "
-                f"{result.stderr[:200]}"
+                f"{cli_name} 返回错误 (code={result.returncode}): {detail}"
             )
 
         # 解析 JSON 输出
-        try:
-            output = json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"{cli_name} 输出非法 JSON: {e}\n"
-                f"stdout[:200]: {result.stdout[:200]}"
-            )
+        if parsed_output is not None:
+            output = parsed_output
+        else:
+            try:
+                output = json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"{cli_name} 输出非法 JSON: {e}\n"
+                    f"stdout[:200]: {result.stdout[:200]}"
+                )
 
         # 校验必填字段
         self._validate_output(output, file_path)

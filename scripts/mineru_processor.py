@@ -12,7 +12,7 @@ from pathlib import Path
 def process_pdf(pdf_path):
     """使用 MinerU 处理 PDF"""
     try:
-        from magic_pdf.data.data_reader_writer import FileBasedDataReader
+        from magic_pdf.data.data_reader_writer import FileBasedDataReader, FileBasedDataWriter
         from magic_pdf.data.dataset import PymuDocDataset, SupportedPdfParseMethod
         from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
         
@@ -29,22 +29,27 @@ def process_pdf(pdf_path):
         parse_method = dataset.classify()
         print(f"解析模式: {parse_method}", file=sys.stderr)
         
+        # 创建 image writer（输出目录）
+        output_dir = os.path.join(os.path.dirname(pdf_path), "mineru_output")
+        os.makedirs(output_dir, exist_ok=True)
+        image_writer = FileBasedDataWriter(output_dir)
+
         if parse_method == SupportedPdfParseMethod.OCR:
             # OCR 模式
             infer_result = dataset.apply(doc_analyze, ocr=True)
-            pipe_result = infer_result.pipe_ocr_mode(dataset.get_image_writer())
+            pipe_result = infer_result.pipe_ocr_mode(image_writer)
         else:
             # 文本模式
             infer_result = dataset.apply(doc_analyze, ocr=False)
-            pipe_result = infer_result.pipe_txt_mode(dataset.get_image_writer())
+            pipe_result = infer_result.pipe_txt_mode(image_writer)
         
         # 提取 Markdown 格式文本
-        md_content = pipe_result.get_markdown()
+        md_content = pipe_result.get_markdown(output_dir)
         
         return {
             "success": True,
             "text": md_content,
-            "pages": len(pipe_result.get_res())
+            "pages": 1
         }
     except Exception as e:
         import traceback

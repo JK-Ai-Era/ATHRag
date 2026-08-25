@@ -39,8 +39,16 @@ class OfficeParser(BaseParser):
         file_path = Path(file_path).resolve()
         ext = file_path.suffix.lower()
 
-        # .doc / .xls / .ppt 旧格式只能用原生解析器
-        if ext in (".doc", ".xls", ".ppt"):
+        # .xls 无 Unstructured 支持，直接走原生（xlrd）
+        if ext == ".xls":
+            return self._parse_with_native(file_path, ext)
+        # .doc / .ppt 优先走 Unstructured，失败再 fallback
+        if ext in (".doc", ".ppt"):
+            if self.unstructured_available:
+                try:
+                    return self._parse_with_unstructured(file_path, ext)
+                except Exception as e:
+                    logger.warning(f"Unstructured 解析 {ext} 失败，回退到原生解析器: {e}")
             return self._parse_with_native(file_path, ext)
 
         config = get_model_config("document", "office")
@@ -74,12 +82,12 @@ class OfficeParser(BaseParser):
 
         parser = UnstructuredOfficeParser()
 
-        if ext == ".docx":
-            result = parser.parse_docx(file_path)
-        elif ext == ".xlsx":
+        if ext in (".docx", ".doc"):
+            result = parser.parse_docx(file_path) if ext == ".docx" else parser.parse_doc(file_path)
+        elif ext in (".xlsx", ".xls"):
             result = parser.parse_xlsx(file_path)
-        elif ext == ".pptx":
-            result = parser.parse_pptx(file_path)
+        elif ext in (".pptx", ".ppt"):
+            result = parser.parse_pptx(file_path) if ext == ".pptx" else parser.parse_ppt(file_path)
         else:
             raise ValueError(f"Unstructured 不支持: {ext}")
 
@@ -175,8 +183,43 @@ class OfficeParser(BaseParser):
     def _parse_xlsx(self, file_path: Path) -> ParseResult:
         """解析 Excel 文档（原生）"""
         try:
-            import openpyxl
+            ext = file_path.suffix.lower()
 
+            if ext == ".xls":
+                # 老格式用 xlrd
+                import xlrd
+                wb = xlrd.open_workbook(str(file_path))
+                sheets = wb.sheets()
+                sheet_names = [s.name for s in sheets]
+                text_parts = []
+                for sheet in sheets:
+                    text_parts.append(f"# 工作表: {sheet.name}\n")
+                    for row_idx in range(sheet.nrows):
+                        row = [str(sheet.cell_value(row_idx, col)) for col in range(sheet.ncols) if sheet.cell_value(row_idx, col) != ""]
+                        row_text = " | ".join(row)
+                        if row_text.strip():
+                            text_parts.append(row_text)
+                content_text = "\n".join(text_parts)
+                if not content_text.strip():
+                    return error_result(str(file_path), "Excel 无文本内容", "xls")
+                metadata = {
+                    "filename": file_path.name,
+                    "file_size": file_path.stat().st_size,
+                    "parser_backend": "xlrd",
+                    "sheets": len(sheet_names),
+                    "sheet_names": sheet_names,
+                }
+                return ParseResult(
+                    source=str(file_path),
+                    type="document",
+                    format="xls",
+                    content=content_text,
+                    metadata=metadata,
+                    parser="office(native/xlrd)",
+                )
+
+            # .xlsx 用 openpyxl
+            import openpyxl
             wb = openpyxl.load_workbook(file_path, data_only=True)
             text_parts = []
 
